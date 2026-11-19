@@ -3,6 +3,8 @@ import { requireUser } from "@/lib/auth";
 import { Empty, PageHeader } from "@/components/ui";
 import { createInvoice } from "@/app/actions/billing";
 import { fmtDate, money } from "@/lib/format";
+import { rateBook } from "@/lib/pricing";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +14,10 @@ export default async function NewInvoice({ searchParams }: { searchParams: Promi
   const clients = await db.client.findMany({ orderBy: { name: "asc" } });
   const clientId = sp.clientId ?? clients[0]?.id;
   const visits = clientId
-    ? await db.assignment.findMany({ where: { status: "COMPLETED", invoiceId: null, location: { clientId } }, include: { location: true, user: true }, orderBy: { date: "asc" } })
+    ? await db.assignment.findMany({ where: { status: "COMPLETED", invoiceId: null, location: { clientId } }, include: { location: true, user: true, serviceType: true }, orderBy: { date: "asc" } })
     : [];
+  const rate = await rateBook();
+  const unpriced = visits.filter((v) => rate(clientId, v.serviceTypeId) == null);
   return (
     <>
       <PageHeader title="New invoice" subtitle="Bill completed visits that haven't been invoiced yet." />
@@ -26,17 +30,26 @@ export default async function NewInvoice({ searchParams }: { searchParams: Promi
           <input type="hidden" name="clientId" value={clientId} />
           <div>
             <div className="label">Unbilled visits</div>
-            {visits.length ? (
+            {visits.length ? (<>
               <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {visits.map((v) => (
-                  <label key={v.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50">
-                    <input type="checkbox" name="assignmentId" value={v.id} defaultChecked className="h-4 w-4" />
-                    <span className="flex-1">{fmtDate(v.date)} · {v.location.name} <span className="text-slate-500">· {v.user?.name}</span></span>
-                    <span className="tabular-nums">{money(v.location.billingRate)}</span>
-                  </label>
-                ))}
+                {visits.map((v) => {
+                  const price = rate(clientId, v.serviceTypeId);
+                  return (
+                    <label key={v.id} className={`flex items-center gap-3 px-3 py-2 text-sm ${price == null ? "opacity-60" : "cursor-pointer hover:bg-slate-50"}`}>
+                      <input type="checkbox" name="assignmentId" value={v.id} defaultChecked={price != null} disabled={price == null} className="h-4 w-4" />
+                      <span className="flex-1">{fmtDate(v.date)} · {v.location.name} <span className="text-slate-500">· {v.serviceType?.name ?? "No service type"} · {v.user?.name}</span></span>
+                      <span className="tabular-nums">{price == null ? <span className="text-amber-600">no price</span> : money(price)}</span>
+                    </label>
+                  );
+                })}
               </div>
-            ) : <Empty>No unbilled visits for this client.</Empty>}
+              {unpriced.length > 0 && (
+                <p className="mt-2 text-sm text-amber-600">
+                  {unpriced.length} visit{unpriced.length > 1 ? "s have" : " has"} no price for {[...new Set(unpriced.map((v) => v.serviceType?.name ?? "no service type"))].join(", ")}.{" "}
+                  <Link href="/clients" className="underline">Set prices on the client</Link> to bill them.
+                </p>
+              )}
+            </>) : <Empty>No unbilled visits for this client.</Empty>}
           </div>
           <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
             <input name="extraDescription" className="input" placeholder="Extra line (e.g. Carpet shampoo – lobby)" />

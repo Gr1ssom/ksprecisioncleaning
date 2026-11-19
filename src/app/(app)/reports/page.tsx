@@ -5,6 +5,7 @@ import { RoomTimeTable } from "@/components/RoomTimeTable";
 import { roomTimeReport } from "@/lib/reports";
 import { hoursBetween, money, todayUTC } from "@/lib/format";
 import { PrintButton } from "./PrintButton";
+import { rateBook } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +18,19 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   const loc = locations.find((l) => l.id === sp.locationId);
 
   // Company-wide: profitability per location
-  const jobs = await db.assignment.findMany({ where: { date: { gte: since }, status: "COMPLETED" }, include: { location: true, timeEntry: { include: { user: true } } } });
+  const jobs = await db.assignment.findMany({ where: { date: { gte: since }, status: "COMPLETED" }, include: { location: true, serviceType: true, timeEntry: { include: { user: true } } } });
+  const rate = await rateBook();
+  const bySvc = new Map<string, { visits: number; revenue: number; hours: number }>();
   const per = new Map<string, { name: string; visits: number; revenue: number; hours: number; labor: number }>();
   let onTime = 0, timed = 0;
   for (const j of jobs) {
     const e = per.get(j.locationId) ?? { name: j.location.name, visits: 0, revenue: 0, hours: 0, labor: 0 };
-    e.visits++; e.revenue += Number(j.location.billingRate);
+    const price = rate(j.location.clientId, j.serviceTypeId) ?? 0;
+    e.visits++; e.revenue += price;
+    const sv = bySvc.get(j.serviceType?.name ?? "No service type") ?? { visits: 0, revenue: 0, hours: 0 };
+    sv.visits++; sv.revenue += price;
+    if (j.timeEntry) sv.hours += hoursBetween(j.timeEntry.clockIn, j.timeEntry.clockOut);
+    bySvc.set(j.serviceType?.name ?? "No service type", sv);
     if (j.timeEntry) {
       const h = hoursBetween(j.timeEntry.clockIn, j.timeEntry.clockOut);
       e.hours += h; e.labor += h * Number(j.timeEntry.user.hourlyRate);
@@ -71,6 +79,21 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
                     <td className="text-right">{r.hours.toFixed(1)}</td><td className="text-right">{money(r.labor)}</td>
                     <td className={`text-right font-semibold ${r.revenue - r.labor < 0 ? "text-red-600" : "text-emerald-600"}`}>{money(r.revenue - r.labor)}</td>
                     <td className="text-right">{r.hours ? money(r.revenue / r.hours) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <h2 className="h2 mb-2 mt-6">By service</h2>
+          <div className="card overflow-x-auto p-0">
+            <table className="tbl">
+              <thead><tr><th>Service</th><th className="text-right">Visits</th><th className="text-right">Revenue</th><th className="text-right">Avg price</th><th className="text-right">Avg hours</th><th className="text-right">$/hour</th></tr></thead>
+              <tbody>
+                {[...bySvc.entries()].map(([name, v]) => (
+                  <tr key={name}>
+                    <td className="font-medium">{name}</td><td className="text-right">{v.visits}</td><td className="text-right">{money(v.revenue)}</td>
+                    <td className="text-right">{money(v.revenue / v.visits)}</td><td className="text-right">{(v.hours / v.visits).toFixed(1)}</td>
+                    <td className="text-right">{v.hours ? money(v.revenue / v.hours) : "—"}</td>
                   </tr>
                 ))}
               </tbody>

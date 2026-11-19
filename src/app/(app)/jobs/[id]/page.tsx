@@ -18,7 +18,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const sp = await searchParams;
   const a = await db.assignment.findUnique({
     where: { id },
-    include: { location: { include: { sops: true } }, user: true, checkins: { include: { user: true }, orderBy: { at: "asc" } }, timeEntry: true, roomSessions: true, roomChecks: true },
+    include: { location: { include: { sops: true } }, user: true, serviceType: true, checkins: { include: { user: true }, orderBy: { at: "asc" } }, timeEntry: true, roomSessions: true, roomChecks: true },
   });
   if (!a) notFound();
   if (user.role === "STAFF" && a.userId !== user.id && a.userId !== null) notFound();
@@ -37,7 +37,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     <>
       <PageHeader
         title={a.location.name}
-        subtitle={`${fmtDate(a.date)} · ${a.startTime}${a.endTime ? `–${a.endTime}` : ""} · ${a.user?.name ?? "Unassigned"}`}
+        subtitle={`${a.serviceType?.name ?? "Clean"} · ${fmtDate(a.date)} · ${a.startTime}${a.endTime ? `–${a.endTime}` : ""} · ${a.user?.name ?? "Unassigned"}`}
         action={<div className="flex items-center gap-2"><Badge value={a.status} />{user.role !== "STAFF" && <Link href={`/jobs/${a.id}/edit`} className="btn-secondary">Edit</Link>}</div>}
       />
       {sp.done && <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Checked out. Nice work! ✨</div>}

@@ -15,7 +15,7 @@ async function main() {
   await db.$transaction([
     db.sopAck.deleteMany(), db.checkin.deleteMany(), db.timeEntry.deleteMany(), db.stockMovement.deleteMany(),
     db.stockLevel.deleteMany(), db.assignment.deleteMany(), db.invoice.deleteMany(), db.issue.deleteMany(),
-    db.roomTaskCheck.deleteMany(), db.roomSession.deleteMany(), db.room.deleteMany(), db.roomTypeTask.deleteMany(), db.layout.deleteMany(), db.sop.deleteMany(), db.location.deleteMany(), db.client.deleteMany(),
+    db.roomTaskCheck.deleteMany(), db.roomSession.deleteMany(), db.room.deleteMany(), db.roomTypeTask.deleteMany(), db.layout.deleteMany(), db.clientRate.deleteMany(), db.serviceType.deleteMany(), db.sop.deleteMany(), db.location.deleteMany(), db.client.deleteMany(),
     db.supply.deleteMany(), db.supplyDepot.deleteMany(), db.announcement.deleteMany(), db.user.deleteMany(),
   ]);
 
@@ -28,9 +28,24 @@ async function main() {
   const acme = await db.client.create({ data: { name: "Acme Dental Group", contactName: "Dr. Patel", email: "billing@acmedental.test", phone: "555-2000", billingAddress: "100 Main St, Overland Park, KS" } });
   const brick = await db.client.create({ data: { name: "Brickyard Offices LLC", contactName: "Jen Ortiz", email: "ap@brickyard.test", billingAddress: "220 W 8th St, Kansas City, MO" } });
 
-  const L1 = await db.location.create({ data: { name: "Acme Dental – Overland Park", address: "100 Main St, Overland Park, KS", latitude: 38.9822, longitude: -94.6708, billingRate: 185, clientId: acme.id, accessNotes: "Key box on rear door, code 4417. Alarm panel left of door – code given by manager." } });
-  const L2 = await db.location.create({ data: { name: "Brickyard Offices – Floor 2-3", address: "220 W 8th St, Kansas City, MO", latitude: 39.1031, longitude: -94.5866, billingRate: 340, clientId: brick.id, accessNotes: "Check in with lobby security. Park in garage level P2." } });
-  const L3 = await db.location.create({ data: { name: "Acme Dental – Lenexa", address: "8700 Renner Blvd, Lenexa, KS", latitude: 38.9636, longitude: -94.7752, billingRate: 160, clientId: acme.id } });
+  const L1 = await db.location.create({ data: { name: "Acme Dental – Overland Park", address: "100 Main St, Overland Park, KS", latitude: 38.9822, longitude: -94.6708, clientId: acme.id, accessNotes: "Key box on rear door, code 4417. Alarm panel left of door – code given by manager." } });
+  const L2 = await db.location.create({ data: { name: "Brickyard Offices – Floor 2-3", address: "220 W 8th St, Kansas City, MO", latitude: 39.1031, longitude: -94.5866, clientId: brick.id, accessNotes: "Check in with lobby security. Park in garage level P2." } });
+  const L3 = await db.location.create({ data: { name: "Acme Dental – Lenexa", address: "8700 Renner Blvd, Lenexa, KS", latitude: 38.9636, longitude: -94.7752, clientId: acme.id } });
+
+  // Service types (same ids as the migration) and per-client prices
+  const svc = {
+    std: await db.serviceType.create({ data: { id: "svc_standard", name: "Standard clean", sortOrder: 0 } }),
+    deep: await db.serviceType.create({ data: { id: "svc_deep", name: "Deep clean", sortOrder: 1 } }),
+    maint: await db.serviceType.create({ data: { id: "svc_maintenance", name: "Maintenance clean", sortOrder: 2 } }),
+  };
+  const price = async (clientId: string, std: number, deep: number, maint: number) =>
+    db.clientRate.createMany({ data: [
+      { clientId, serviceTypeId: svc.std.id, price: std },
+      { clientId, serviceTypeId: svc.deep.id, price: deep },
+      { clientId, serviceTypeId: svc.maint.id, price: maint },
+    ] });
+  await price(acme.id, 185, 420, 120);
+  await price(brick.id, 340, 780, 220);
 
   const depot = await db.supplyDepot.create({ data: { name: "Main Warehouse", address: "1500 Industrial Dr, Olathe, KS", latitude: 38.8814, longitude: -94.8191 } });
   const depot2 = await db.supplyDepot.create({ data: { name: "Downtown Closet", address: "220 W 8th St (B1), Kansas City, MO", latitude: 39.1031, longitude: -94.5866 } });
@@ -83,7 +98,9 @@ async function main() {
 
   // Residential client w/ a traced home layout
   const johnson = await db.client.create({ data: { name: "Johnson Family", contactName: "Beth Johnson", email: "beth.johnson@example.test", phone: "555-3300" } });
-  const home = await db.location.create({ data: { name: "Johnson Residence", address: "4512 W 112th Terrace, Leawood, KS", latitude: 38.9192, longitude: -94.6266, billingRate: 210, clientId: johnson.id, accessNotes: "Garage code 2291. Dog (Biscuit) is friendly – keep back gate closed." } });
+  // Residential: standard + deep priced; maintenance left unpriced to show the "no price" state.
+  await db.clientRate.createMany({ data: [{ clientId: johnson.id, serviceTypeId: svc.std.id, price: 210 }, { clientId: johnson.id, serviceTypeId: svc.deep.id, price: 465 }] });
+  const home = await db.location.create({ data: { name: "Johnson Residence", address: "4512 W 112th Terrace, Leawood, KS", latitude: 38.9192, longitude: -94.6266, clientId: johnson.id, accessNotes: "Garage code 2291. Dog (Biscuit) is friendly – keep back gate closed." } });
   const homeLayout = await db.layout.create({ data: { name: "Main floor", locationId: home.id, aspect: 1.6 } });
   const homeRooms = [
     { name: "Kitchen", type: "Kitchen", points: rect(4, 6, 36, 40), color: "#f59e0b", customTasks: ["Clean inside fridge (1st Mon of month)", "Wipe dog bowl area"] },
@@ -148,6 +165,18 @@ async function main() {
       t = new Date(end.getTime() + 2 * 60_000);
     }
   }
+
+  // Mix of services: most standard, some deep / maintenance.
+  await db.assignment.updateMany({ where: { serviceTypeId: null }, data: { serviceTypeId: svc.std.id } });
+  const past = await db.assignment.findMany({ where: { status: "COMPLETED" }, orderBy: { date: "asc" } });
+  const brickPast = past.filter((a) => a.locationId === L2.id);
+  const homePast = past.filter((a) => a.locationId === home.id);
+  await db.assignment.update({ where: { id: brickPast[0].id }, data: { serviceTypeId: svc.deep.id } });
+  await db.assignment.updateMany({ where: { id: { in: past.filter((a) => a.locationId === L1.id).slice(0, 2).map((a) => a.id) } }, data: { serviceTypeId: svc.maint.id } });
+  await db.assignment.update({ where: { id: homePast[0].id }, data: { serviceTypeId: svc.deep.id } });
+  await db.assignment.update({ where: { id: homePast[1].id }, data: { serviceTypeId: svc.maint.id } }); // unpriced for Johnson
+  const upcoming = await db.assignment.findFirst({ where: { locationId: L3.id, status: "SCHEDULED" } });
+  if (upcoming) await db.assignment.update({ where: { id: upcoming.id }, data: { serviceTypeId: svc.maint.id } });
 
   await db.issue.create({ data: { title: "Broken soap dispenser – men's room", detail: "Dispenser cover cracked, needs replacement.", locationId: L2.id, reportedById: s2.id } });
   await db.announcement.create({ data: { title: "Welcome to the new KS app!", body: "Check in at supply pickup and on arrival at every site. Questions? Ask Marcus." } });

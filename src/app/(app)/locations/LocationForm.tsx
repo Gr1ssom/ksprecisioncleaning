@@ -1,6 +1,6 @@
 import { saveLocation } from "@/app/actions/manage";
 
-type Loc = { id: string; name: string; address: string; latitude: number | null; longitude: number | null; geofenceM: number; accessNotes: string | null; billingRate: unknown; clientId: string | null; active: boolean };
+type Loc = { id: string; name: string; address: string; latitude: number | null; longitude: number | null; geofenceM: number; accessNotes: string | null; clientId: string | null; active: boolean };
 export function LocationForm({ loc, clients }: { loc?: Loc; clients: { id: string; name: string }[] }) {
   return (
     <form action={saveLocation} className="space-y-3">
@@ -18,12 +18,10 @@ export function LocationForm({ loc, clients }: { loc?: Loc; clients: { id: strin
         <div><label className="label">Geofence (m)</label><input name="geofenceM" type="number" className="input" defaultValue={loc?.geofenceM ?? 150} /></div>
       </div>
       <p className="text-xs text-slate-500">Tip: right-click the building in Google Maps to copy its coordinates. Check-ins outside the geofence are flagged.</p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div><label className="label">Price per visit ($)</label><input name="billingRate" type="number" step="0.01" className="input" defaultValue={String(loc?.billingRate ?? "")} /></div>
-        <div><label className="label">Status</label>
-          <select name="active" className="input" defaultValue={loc?.active === false ? "off" : "on"}><option value="on">Active</option><option value="off">Inactive</option></select>
-        </div>
+      <div className="sm:w-1/2"><label className="label">Status</label>
+        <select name="active" className="input" defaultValue={loc?.active === false ? "off" : "on"}><option value="on">Active</option><option value="off">Inactive</option></select>
       </div>
+      <p className="text-xs text-slate-500">Prices are set per client and service type on the Clients page.</p>
       <div><label className="label">Access notes (key box, alarm, parking)</label><textarea name="accessNotes" rows={2} className="input" defaultValue={loc?.accessNotes ?? ""} /></div>
       <button className="btn-primary">Save</button>
     </form>

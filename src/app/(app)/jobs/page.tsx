@@ -17,7 +17,7 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
   const [jobs, staff] = await Promise.all([
     db.assignment.findMany({
       where: { date: { gte: days[0], lte: days[6] }, ...(staffView ? { OR: [{ userId: user.id }, { userId: null }] } : sp.who ? { userId: sp.who === "open" ? null : sp.who } : {}) },
-      include: { location: true, user: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }],
+      include: { location: true, user: true, serviceType: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }],
     }),
     staffView ? [] : db.user.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
   ]);
@@ -55,6 +55,7 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
                   return (
                     <Link key={j.id} href={`/jobs/${j.id}`} className={`block rounded-lg border p-2 text-xs hover:border-brand-500 ${j.userId ? "border-slate-200 bg-surface" : "border-dashed border-amber-400 bg-surface"}`}>
                       <div className="font-semibold text-slate-900">{j.startTime} · {j.location.name}</div>
+                      {j.serviceType && <div className="text-[11px] font-medium text-brand-600">{j.serviceType.name}</div>}
                       <div className="mt-0.5 flex items-center justify-between gap-1 text-slate-500">
                         <span className="truncate">{j.user?.name ?? "Open shift"}</span>
                         <Badge value={j.status} />

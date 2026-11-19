@@ -194,7 +194,7 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks }: {
               <div className="label">Common tasks ({selected.type})</div>
               {(commonTasks[selected.type] ?? []).length ? (
                 <ul className="list-disc pl-5 text-xs text-slate-600">{commonTasks[selected.type].map((t) => <li key={t}>{t}</li>)}</ul>
-              ) : <p className="text-xs text-slate-500">None for this type. Add them under Room tasks.</p>}
+              ) : <p className="text-xs text-slate-500">None for this type. Add them in Settings › Room tasks.</p>}
             </div>
             <div>
               <label className="label">Custom tasks for this room (one per line)</label>

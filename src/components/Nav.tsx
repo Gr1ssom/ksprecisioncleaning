@@ -18,7 +18,7 @@ const ITEMS: Item[] = [
   { href: "/clients", label: "Clients", icon: "🤝", min: "MANAGER" },
   { href: "/invoices", label: "Invoices", icon: "🧾", min: "MANAGER" },
   { href: "/team", label: "Team", icon: "👥", min: "MANAGER" },
-  { href: "/settings", label: "Room tasks", icon: "⚙️", min: "MANAGER" },
+  { href: "/settings", label: "Settings", icon: "⚙️", min: "MANAGER" },
   { href: "/payroll", label: "Payroll", icon: "💵", min: "OWNER" },
 ];
 const rank = { STAFF: 1, MANAGER: 2, OWNER: 3 } as const;

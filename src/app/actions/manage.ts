@@ -18,6 +18,7 @@ export async function saveAssignment(form: FormData) {
   const id = s(form, "id");
   const data = {
     locationId: String(form.get("locationId")),
+    serviceTypeId: s(form, "serviceTypeId"),
     userId: s(form, "userId"),
     date: new Date(String(form.get("date")) + "T00:00:00Z"),
     startTime: String(form.get("startTime") || "09:00"),
@@ -53,7 +54,7 @@ export async function saveLocation(form: FormData) {
   const data = {
     name: String(form.get("name")), address: String(form.get("address")),
     latitude: n(form, "latitude"), longitude: n(form, "longitude"), geofenceM: n(form, "geofenceM") ?? 150,
-    accessNotes: s(form, "accessNotes"), billingRate: n(form, "billingRate") ?? 0, clientId: s(form, "clientId"),
+    accessNotes: s(form, "accessNotes"), clientId: s(form, "clientId"),
     active: form.get("active") !== "off",
   };
   const loc = id ? await db.location.update({ where: { id }, data }) : await db.location.create({ data });
@@ -182,9 +183,27 @@ export async function saveClient(form: FormData) {
   await requireUser("MANAGER");
   const id = s(form, "id");
   const data = { name: String(form.get("name")), contactName: s(form, "contactName"), email: s(form, "email"), phone: s(form, "phone"), billingAddress: s(form, "billingAddress"), waveCustomerId: s(form, "waveCustomerId"), notes: s(form, "notes") };
-  if (id) await db.client.update({ where: { id }, data });
-  else await db.client.create({ data });
+  const client = id ? await db.client.update({ where: { id }, data }) : await db.client.create({ data });
+  // Per-visit price for each service type: rate_<serviceTypeId>. Blank = not offered / not priced yet.
+  for (const [k, v] of form.entries()) {
+    if (!k.startsWith("rate_")) continue;
+    const serviceTypeId = k.slice(5);
+    const where = { clientId_serviceTypeId: { clientId: client.id, serviceTypeId } };
+    const val = String(v).trim();
+    if (val === "") await db.clientRate.deleteMany({ where: { clientId: client.id, serviceTypeId } });
+    else await db.clientRate.upsert({ where, create: { clientId: client.id, serviceTypeId, price: Number(val) }, update: { price: Number(val) } });
+  }
   done("/clients");
+}
+
+// ---------- Service types ----------
+export async function saveServiceType(form: FormData) {
+  await requireUser("MANAGER");
+  const id = s(form, "id");
+  const name = String(form.get("name")).trim();
+  if (id) await db.serviceType.update({ where: { id }, data: { name, active: form.get("active") !== "off" } });
+  else await db.serviceType.create({ data: { name, sortOrder: (await db.serviceType.count()) } });
+  done("/settings");
 }
 
 // ---------- Team (owner manages roles/pay; managers can add staff) ----------

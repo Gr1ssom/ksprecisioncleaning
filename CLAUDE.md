@@ -50,6 +50,16 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
 - GPS check-ins use the browser Geolocation API (`src/components/GeoForm.tsx`). A check-in without
   GPS still saves and is flagged; distance is checked against the site's geofence (`src/lib/geo.ts`).
 
+## Pricing
+- Billing is **per visit**. Every job (`Assignment`) has a `ServiceType` (Standard clean, Deep clean,
+  Maintenance clean, and any the owner adds in Settings). Each client has its own price per service
+  type in `ClientRate`. There is no per-location price.
+- Read prices through `rateBook()` in `src/lib/pricing.ts`. A missing rate means "not priced": show
+  it as such and keep the visit out of invoices (never bill it at $0).
+- Invoice lines snapshot the price when the invoice is created (`Invoice.lines`), so changing a rate
+  later doesn't change old invoices.
+- Service types are retired (`active = false`), not deleted, so old jobs keep their label.
+
 ## Floor plans and room timers
 - A `Layout` belongs to a location; `Room`s are polygons in **percent of the canvas** (`points`).
 - A room's checklist = common tasks for its `type` (`RoomTypeTask`) + its own `customTasks`

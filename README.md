@@ -16,8 +16,9 @@ staff, manager and owner views.
 | **Issues**: report with photo, resolve | report | resolve | ✓ |
 | **Hours**: time from check-in/out | own | approve, edit | ✓ |
 | **Inventory**: stock per pickup location, auto-deducted on pickup, low-stock alerts | — | ✓ | ✓ |
-| **Reports**: time by room (client-ready), margin per location, on-time rate | — | ✓ | ✓ |
-| **Clients and invoices**: bill completed visits, send through Wave | — | ✓ | ✓ |
+| **Reports**: time by room (client-ready), margin per location and per service, on-time rate | — | ✓ | ✓ |
+| **Clients and pricing**: each client's per-visit price for Standard, Deep and Maintenance clean (and any service you add) | — | ✓ | ✓ |
+| **Invoices**: bill completed visits at the client's price for that service, send through Wave | — | ✓ | ✓ |
 | **Payroll**: regular/overtime hours CSV for Wave Payroll | — | — | ✓ |
 | **Team**: logins, roles, pay rates | — | add staff | ✓ |
 

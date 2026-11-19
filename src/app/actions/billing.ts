@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { fmtDate, isoDay, lineTotal, todayUTC, type Line } from "@/lib/format";
+import { rateBook } from "@/lib/pricing";
 import { ensureWaveCustomer, sendWaveInvoice, waveConfigured } from "@/lib/wave";
 
 async function nextNumber() {
@@ -16,17 +17,26 @@ export async function createInvoice(form: FormData) {
   await requireUser("MANAGER");
   const clientId = String(form.get("clientId"));
   const ids = form.getAll("assignmentId").map(String);
-  const visits = await db.assignment.findMany({ where: { id: { in: ids }, invoiceId: null }, include: { location: true }, orderBy: { date: "asc" } });
-
-  // Group visits by location → one line per location.
-  const byLoc = new Map<string, { name: string; rate: number; dates: string[] }>();
-  for (const v of visits) {
-    const e = byLoc.get(v.locationId) ?? { name: v.location.name, rate: Number(v.location.billingRate), dates: [] };
-    e.dates.push(fmtDate(v.date).replace(/, \d{4}$/, ""));
-    byLoc.set(v.locationId, e);
+  const visits = await db.assignment.findMany({
+    where: { id: { in: ids }, invoiceId: null, location: { clientId } }, include: { location: true, serviceType: true }, orderBy: { date: "asc" },
+  });
+  const rate = await rateBook();
+  const unpriced = visits.filter((v) => rate(clientId, v.serviceTypeId) == null);
+  if (unpriced.length) {
+    const names = [...new Set(unpriced.map((v) => v.serviceType?.name ?? "No service type"))].join(", ");
+    throw new Error(`No price set for: ${names}. Add it on the client, then try again.`);
   }
-  const lines: Line[] = [...byLoc.values()].map((e) => ({
-    description: `Cleaning – ${e.name} (${e.dates.join(", ")})`, quantity: e.dates.length, unitPrice: e.rate,
+
+  // One line per location + service type, priced from the client's rate for that service.
+  const groups = new Map<string, { label: string; rate: number; dates: string[] }>();
+  for (const v of visits) {
+    const key = `${v.locationId}|${v.serviceTypeId}`;
+    const e = groups.get(key) ?? { label: `${v.serviceType!.name} – ${v.location.name}`, rate: rate(clientId, v.serviceTypeId)!, dates: [] };
+    e.dates.push(fmtDate(v.date).replace(/, \d{4}$/, ""));
+    groups.set(key, e);
+  }
+  const lines: Line[] = [...groups.values()].map((e) => ({
+    description: `${e.label} (${e.dates.join(", ")})`, quantity: e.dates.length, unitPrice: e.rate,
   }));
   const extraDesc = String(form.get("extraDescription") ?? "").trim();
   const extraAmt = Number(form.get("extraAmount") || 0);

@@ -2,9 +2,9 @@ import { saveAssignment } from "@/app/actions/manage";
 import { isoDay, todayUTC, type Task } from "@/lib/format";
 
 type Opt = { id: string; name: string };
-export function JobForm({ locations, staff, job, defaults }: {
-  locations: Opt[]; staff: Opt[];
-  job?: { id: string; locationId: string; userId: string | null; date: Date; startTime: string; endTime: string | null; notes: string | null; tasks: unknown };
+export function JobForm({ locations, staff, serviceTypes, job, defaults }: {
+  locations: Opt[]; staff: Opt[]; serviceTypes: Opt[];
+  job?: { id: string; locationId: string; serviceTypeId: string | null; userId: string | null; date: Date; startTime: string; endTime: string | null; notes: string | null; tasks: unknown };
   defaults?: { locationId?: string; date?: string };
 }) {
   return (
@@ -15,6 +15,12 @@ export function JobForm({ locations, staff, job, defaults }: {
           <label className="label">Location</label>
           <select name="locationId" className="input" defaultValue={job?.locationId ?? defaults?.locationId} required>
             {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Service</label>
+          <select name="serviceTypeId" className="input" defaultValue={job?.serviceTypeId ?? serviceTypes[0]?.id} required>
+            {serviceTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
         <div>

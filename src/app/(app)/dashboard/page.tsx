@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { postAnnouncement } from "@/app/actions/manage";
+import { rateBook } from "@/lib/pricing";
 import { requireUser } from "@/lib/auth";
 import { Badge, Empty, FenceBadge, PageHeader, Stat } from "@/components/ui";
 import { fmtDate, fmtDateTime, fmtTime, hoursBetween, money, todayUTC, type Task } from "@/lib/format";
@@ -27,8 +28,8 @@ export default async function Dashboard() {
 async function StaffDash({ userId }: { userId: string }) {
   const today = todayUTC();
   const [jobs, upcoming, active, weekEntries, open] = await Promise.all([
-    db.assignment.findMany({ where: { userId, date: today, status: { not: "CANCELLED" } }, include: { location: true }, orderBy: { startTime: "asc" } }),
-    db.assignment.findMany({ where: { userId, date: { gt: today, lte: todayUTC(7) }, status: "SCHEDULED" }, include: { location: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }] }),
+    db.assignment.findMany({ where: { userId, date: today, status: { not: "CANCELLED" } }, include: { location: true, serviceType: true }, orderBy: { startTime: "asc" } }),
+    db.assignment.findMany({ where: { userId, date: { gt: today, lte: todayUTC(7) }, status: "SCHEDULED" }, include: { location: true, serviceType: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }] }),
     db.timeEntry.findFirst({ where: { userId, clockOut: null }, include: { assignment: { include: { location: true } } } }),
     db.timeEntry.findMany({ where: { userId, clockIn: { gte: todayUTC(-((todayUTC().getUTCDay() + 6) % 7)) } } }),
     db.assignment.findMany({ where: { userId: null, date: { gte: today }, status: "SCHEDULED" }, include: { location: true }, take: 3 }),
@@ -74,7 +75,7 @@ async function StaffDash({ userId }: { userId: string }) {
   );
 }
 
-type JobRow = { id: string; date: Date; startTime: string; endTime: string | null; status: string; tasks: unknown; location: { name: string; address: string }; user?: { name: string } | null };
+type JobRow = { id: string; date: Date; startTime: string; endTime: string | null; status: string; tasks: unknown; location: { name: string; address: string }; user?: { name: string } | null; serviceType?: { name: string } | null };
 function JobList({ jobs, showDate, showUser }: { jobs: JobRow[]; showDate?: boolean; showUser?: boolean }) {
   return (
     <div className="space-y-2">
@@ -85,7 +86,7 @@ function JobList({ jobs, showDate, showUser }: { jobs: JobRow[]; showDate?: bool
             <div className="min-w-0">
               <div className="truncate font-semibold">{j.location.name}</div>
               <div className="truncate text-xs text-slate-500">
-                {showDate && `${fmtDate(j.date)} · `}{j.startTime}{j.endTime ? `–${j.endTime}` : ""}
+                {j.serviceType && `${j.serviceType.name} · `}{showDate && `${fmtDate(j.date)} · `}{j.startTime}{j.endTime ? `–${j.endTime}` : ""}
                 {showUser && ` · ${j.user?.name ?? "Unassigned"}`}
               </div>
             </div>
@@ -104,7 +105,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
   const today = todayUTC();
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const [jobs, onClock, flagged, issues, stock, unapproved, outstanding, paidMonth, unbilled, monthHours] = await Promise.all([
-    db.assignment.findMany({ where: { date: today, status: { not: "CANCELLED" } }, include: { location: true, user: true }, orderBy: { startTime: "asc" } }),
+    db.assignment.findMany({ where: { date: today, status: { not: "CANCELLED" } }, include: { location: true, user: true, serviceType: true }, orderBy: { startTime: "asc" } }),
     db.timeEntry.findMany({ where: { clockOut: null }, include: { user: true, assignment: { include: { location: true } } } }),
     db.checkin.findMany({ where: { withinFence: false, at: { gte: todayUTC(-7) } }, include: { user: true, location: true, depot: true }, orderBy: { at: "desc" }, take: 5 }),
     db.issue.count({ where: { status: "OPEN" } }),
@@ -117,7 +118,9 @@ async function ManagerDash({ owner }: { owner: boolean }) {
   ]);
   const low = stock.filter((s) => s.quantity <= s.supply.reorderAt);
   const unassigned = jobs.filter((j) => !j.userId).length;
-  const unbilledAmt = unbilled.reduce((s, a) => s + Number(a.location.billingRate), 0);
+  const rate = await rateBook();
+  const unbilledAmt = unbilled.reduce((s, a) => s + (rate(a.location.clientId, a.serviceTypeId) ?? 0), 0);
+  const unpriced = unbilled.filter((a) => rate(a.location.clientId, a.serviceTypeId) == null).length;
   const laborMonth = monthHours.reduce((s, e) => s + hoursBetween(e.clockIn, e.clockOut) * Number(e.user.hourlyRate), 0);
 
   return (
@@ -132,7 +135,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat label="Outstanding A/R" value={money(outstanding._sum.total)} hint={`${outstanding._count} sent invoices`} tone="blue" href="/invoices" />
           <Stat label="Paid this month" value={money(paidMonth._sum.total)} tone="green" />
-          <Stat label="Ready to bill" value={money(unbilledAmt)} hint={`${unbilled.length} completed visits`} href="/invoices/new" />
+          <Stat label="Ready to bill" value={money(unbilledAmt)} hint={unpriced ? `${unpriced} visit${unpriced === 1 ? " has" : "s have"} no price set` : `${unbilled.length} completed visits`} tone={unpriced ? "amber" : "slate"} href="/invoices/new" />
           <Stat label="Labor this month" value={money(laborMonth)} hint={`${unapproved} entries to approve`} href="/payroll" />
         </div>
       )}
