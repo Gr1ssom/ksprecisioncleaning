@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef7ff;
+  --color-brand-100: #d9edff;
+  --color-brand-500: #1d8fe1;
+  --color-brand-600: #0b72c2;
+  --color-brand-700: #0a5a99;
+  --color-brand-900: #0c2f4f;
+  --color-surface: #ffffff;
+}
+
+/*
+ * Dark mode: the slate scale is mirrored, so every slate text/border/background flips with the
+ * theme. Cards use bg-surface (never bg-white) so they darken with their text.
+ * Tinted chips (bg-*-100 text-*-700) intentionally stay light in both themes.
+ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: #111827;
+    --color-slate-50: #0b1220;
+    --color-slate-100: #1a2333;
+    --color-slate-200: #263247;
+    --color-slate-300: #374359;
+    --color-slate-400: #6b7a90;
+    --color-slate-500: #94a3b8;
+    --color-slate-600: #cbd5e1;
+    --color-slate-700: #e2e8f0;
+    --color-slate-800: #f1f5f9;
+    --color-slate-900: #f8fafc;
+    --color-brand-50: #0f2a44;
+    --color-brand-700: #9fd0ff;
+    color-scheme: dark;
+  }
+}
+
+body { @apply bg-slate-50 text-slate-900 antialiased; }
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:opacity-50 cursor-pointer;
+}
+
+@layer components {
+  .card { @apply rounded-xl border border-slate-200 bg-surface p-4 shadow-sm; }
+  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-700; }
+  .btn-secondary { @apply btn border border-slate-300 bg-surface text-slate-700 hover:bg-slate-50; }
+  .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .btn-success { @apply btn bg-emerald-600 text-white hover:bg-emerald-700; }
+  .input { @apply w-full rounded-lg border border-slate-300 bg-surface px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100; }
+  .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500; }
+  .h1 { @apply text-2xl font-bold tracking-tight text-slate-900; }
+  .h2 { @apply text-lg font-semibold text-slate-900; }
+  .muted { @apply text-sm text-slate-500; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+  .tbl { @apply w-full text-left text-sm; }
+  .tbl th { @apply border-b border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500; }
+  .tbl td { @apply border-b border-slate-100 px-3 py-2 align-top; }
+}

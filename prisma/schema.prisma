@@ -1,0 +1,322 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STAFF
+  MANAGER
+  OWNER
+}
+
+enum CheckinType {
+  SUPPLY_PICKUP
+  SITE_IN
+  SITE_OUT
+}
+
+enum AssignmentStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  VOID
+}
+
+enum IssueStatus {
+  OPEN
+  RESOLVED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  role         Role     @default(STAFF)
+  hourlyRate   Decimal  @default(0) @db.Decimal(10, 2)
+  waveEmployeeId String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  assignments  Assignment[] @relation("AssignedTo")
+  createdAssignments Assignment[] @relation("CreatedBy")
+  checkins     Checkin[]
+  timeEntries  TimeEntry[]
+  stockMoves   StockMovement[]
+  issues       Issue[]       @relation("ReportedBy")
+  sopAcks      SopAck[]
+  roomSessions RoomSession[]
+}
+
+model Client {
+  id             String     @id @default(cuid())
+  name           String
+  contactName    String?
+  email          String?
+  phone          String?
+  billingAddress String?
+  waveCustomerId String?
+  notes          String?
+  createdAt      DateTime   @default(now())
+  locations      Location[]
+  invoices       Invoice[]
+}
+
+model Location {
+  id           String   @id @default(cuid())
+  name         String
+  address      String
+  latitude     Float?
+  longitude    Float?
+  geofenceM    Int      @default(150)
+  accessNotes  String?  // alarm codes, key box, parking, etc.
+  billingRate  Decimal  @default(0) @db.Decimal(10, 2) // per visit
+  active       Boolean  @default(true)
+  clientId     String?
+  client       Client?  @relation(fields: [clientId], references: [id])
+  createdAt    DateTime @default(now())
+
+  sops         Sop[]
+  layouts      Layout[]
+  assignments  Assignment[]
+  checkins     Checkin[]
+  issues       Issue[]
+}
+
+model SupplyDepot {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  latitude  Float?
+  longitude Float?
+  geofenceM Int      @default(150)
+  stock     StockLevel[]
+  checkins  Checkin[]
+  moves     StockMovement[]
+}
+
+model Sop {
+  id         String    @id @default(cuid())
+  title      String
+  category   String    @default("General")
+  body       String    // markdown-ish: one step per line
+  locationId String?   // null = company-wide SOP
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  version    Int       @default(1)
+  updatedAt  DateTime  @updatedAt
+  acks       SopAck[]
+}
+
+model SopAck {
+  id      String   @id @default(cuid())
+  sopId   String
+  sop     Sop      @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version Int
+  ackedAt DateTime @default(now())
+  @@unique([sopId, userId, version])
+}
+
+model Layout {
+  id         String   @id @default(cuid())
+  name       String   // e.g. "Floor 1"
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  imageData  String?  // data URL of uploaded floor plan (swap for object storage at scale)
+  aspect     Float    @default(1.5) // width / height of the drawing canvas
+  sortOrder  Int      @default(0)
+  updatedAt  DateTime @updatedAt
+  rooms      Room[]
+}
+
+/// A traced section of a floor plan. points = [[x,y], ...] in % of canvas.
+model Room {
+  id          String   @id @default(cuid())
+  layoutId    String
+  layout      Layout   @relation(fields: [layoutId], references: [id], onDelete: Cascade)
+  name        String
+  type        String   @default("Other") // matches RoomTypeTask.roomType
+  points      Json     @default("[]")
+  color       String   @default("#3b82f6")
+  customTasks Json     @default("[]") // ["Dust piano", ...] specific to this room
+  notes       String?
+  sessions    RoomSession[]
+  taskChecks  RoomTaskCheck[]
+}
+
+/// Company-wide "common" checklist applied to every room of a given type.
+model RoomTypeTask {
+  id        String @id @default(cuid())
+  roomType  String
+  label     String
+  sortOrder Int    @default(0)
+}
+
+/// Start/stop timer for time spent in a room during a job.
+model RoomSession {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  roomId       String
+  room         Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  startedAt    DateTime   @default(now())
+  endedAt      DateTime?
+}
+
+model RoomTaskCheck {
+  id           String     @id @default(cuid())
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  roomId       String
+  room         Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  label        String
+  userId       String
+  doneAt       DateTime   @default(now())
+  @@unique([assignmentId, roomId, label])
+}
+
+model Assignment {
+  id          String           @id @default(cuid())
+  locationId  String
+  location    Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?            @relation("AssignedTo", fields: [userId], references: [id])
+  createdById String?
+  createdBy   User?            @relation("CreatedBy", fields: [createdById], references: [id])
+  date        DateTime         @db.Date
+  startTime   String           // "18:00"
+  endTime     String?
+  status      AssignmentStatus @default(SCHEDULED)
+  tasks       Json             @default("[]") // [{label, done}]
+  notes       String?
+  invoiceId   String?
+  invoice     Invoice?         @relation(fields: [invoiceId], references: [id])
+  createdAt   DateTime         @default(now())
+  checkins    Checkin[]
+  timeEntry   TimeEntry?
+  roomSessions RoomSession[]
+  roomChecks  RoomTaskCheck[]
+}
+
+model Checkin {
+  id           String      @id @default(cuid())
+  type         CheckinType
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  locationId   String?
+  location     Location?   @relation(fields: [locationId], references: [id])
+  depotId      String?
+  depot        SupplyDepot? @relation(fields: [depotId], references: [id])
+  assignmentId String?
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id])
+  latitude     Float?
+  longitude    Float?
+  accuracyM    Float?
+  distanceM    Float?
+  withinFence  Boolean?
+  note         String?
+  photoData    String?
+  at           DateTime    @default(now())
+}
+
+model TimeEntry {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  assignmentId String?     @unique
+  assignment   Assignment? @relation(fields: [assignmentId], references: [id])
+  clockIn      DateTime
+  clockOut     DateTime?
+  approved     Boolean     @default(false)
+  note         String?
+}
+
+model Supply {
+  id          String   @id @default(cuid())
+  name        String
+  sku         String?
+  unit        String   @default("each")
+  unitCost    Decimal  @default(0) @db.Decimal(10, 2)
+  reorderAt   Int      @default(5)
+  stock       StockLevel[]
+  moves       StockMovement[]
+}
+
+model StockLevel {
+  id       String      @id @default(cuid())
+  supplyId String
+  supply   Supply      @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  depotId  String
+  depot    SupplyDepot @relation(fields: [depotId], references: [id], onDelete: Cascade)
+  quantity Int         @default(0)
+  @@unique([supplyId, depotId])
+}
+
+model StockMovement {
+  id        String      @id @default(cuid())
+  supplyId  String
+  supply    Supply      @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  depotId   String
+  depot     SupplyDepot @relation(fields: [depotId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id])
+  delta     Int         // negative = pickup/use, positive = restock
+  reason    String      // PICKUP | RESTOCK | ADJUST
+  at        DateTime    @default(now())
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  number        String        @unique
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  issueDate     DateTime      @db.Date
+  dueDate       DateTime      @db.Date
+  status        InvoiceStatus @default(DRAFT)
+  lines         Json          @default("[]") // [{description, quantity, unitPrice}]
+  total         Decimal       @default(0) @db.Decimal(12, 2)
+  memo          String?
+  waveInvoiceId String?
+  waveViewUrl   String?
+  waveError     String?
+  sentAt        DateTime?
+  createdAt     DateTime      @default(now())
+  assignments   Assignment[]
+}
+
+model Issue {
+  id           String      @id @default(cuid())
+  title        String
+  detail       String?
+  photoData    String?
+  locationId   String?
+  location     Location?   @relation(fields: [locationId], references: [id])
+  reportedById String
+  reportedBy   User        @relation("ReportedBy", fields: [reportedById], references: [id])
+  status       IssueStatus @default(OPEN)
+  createdAt    DateTime    @default(now())
+  resolvedAt   DateTime?
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+}
