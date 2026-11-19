@@ -71,7 +71,7 @@ export default async function Inventory() {
         </section>
         <section className="space-y-3">
           <details className="card">
-            <summary className="cursor-pointer font-semibold text-brand-600">＋ New supply item</summary>
+            <summary className="cursor-pointer font-semibold text-brand-600">New supply item</summary>
             <form action={saveSupply} className="mt-3 grid grid-cols-2 gap-2">
               <input name="name" placeholder="Name" className="input col-span-2" required />
               <input name="sku" placeholder="SKU" className="input" />
@@ -82,7 +82,7 @@ export default async function Inventory() {
             </form>
           </details>
           <details className="card">
-            <summary className="cursor-pointer font-semibold text-brand-600">＋ New pickup location</summary>
+            <summary className="cursor-pointer font-semibold text-brand-600">New pickup location</summary>
             <form action={saveDepot} className="mt-3 grid grid-cols-2 gap-2">
               <input name="name" placeholder="Name" className="input col-span-2" required />
               <input name="address" placeholder="Address" className="input col-span-2" required />

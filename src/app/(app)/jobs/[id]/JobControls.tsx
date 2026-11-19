@@ -10,8 +10,8 @@ export function TaskList({ id, tasks, canWork }: { id: string; tasks: Task[]; ca
   return (
     <div className="card space-y-1">
       {opt.map((t, i) => (
-        <label key={i} className="flex items-center gap-3 rounded-lg p-2 text-sm hover:bg-slate-50">
-          <input type="checkbox" className="h-5 w-5 accent-emerald-600" checked={t.done} disabled={!canWork} onChange={() => start(async () => { flip(i); await toggleTask(id, i); })} />
+        <label key={i} className="flex min-h-12 items-center gap-3 rounded-lg px-2 py-3 text-base hover:bg-slate-50 md:min-h-0 md:py-2 md:text-sm">
+          <input type="checkbox" className="h-6 w-6 accent-emerald-600 md:h-5 md:w-5" checked={t.done} disabled={!canWork} onChange={() => start(async () => { flip(i); await toggleTask(id, i); })} />
           <span className={t.done ? "text-slate-400 line-through" : ""}>{t.label}</span>
         </label>
       ))}

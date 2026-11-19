@@ -1,3 +1,4 @@
+import { MapPin } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
@@ -32,7 +33,7 @@ export default async function Sops({ searchParams }: { searchParams: Promise<{ q
               return (
                 <details key={s.id} id={s.id} className="card">
                   <summary className="flex cursor-pointer items-center justify-between gap-2">
-                    <span className="font-semibold">{s.title}{s.location && <span className="ml-2 text-xs font-normal text-slate-500">📍 {s.location.name}</span>}</span>
+                    <span className="font-semibold">{s.title}{s.location && <span className="ml-2 text-xs font-normal text-slate-500"><MapPin className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{s.location.name}</span>}</span>
                     <span className={`badge ${acked ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{acked ? "read" : "to read"}</span>
                   </summary>
                   <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm">{s.body.split("\n").filter(Boolean).map((l, i) => <li key={i}>{l}</li>)}</ol>
@@ -57,7 +58,7 @@ export default async function Sops({ searchParams }: { searchParams: Promise<{ q
       ))}
       {mgr && (
         <details className="card max-w-2xl">
-          <summary className="cursor-pointer font-semibold text-brand-600">＋ New company SOP</summary>
+          <summary className="cursor-pointer font-semibold text-brand-600">New company SOP</summary>
           <form action={saveSop} className="mt-3 space-y-2">
             <div className="grid grid-cols-2 gap-2"><input name="title" placeholder="Title" className="input" required /><input name="category" placeholder="Category" className="input" /></div>
             <textarea name="body" rows={6} className="input" placeholder="One step per line" required />

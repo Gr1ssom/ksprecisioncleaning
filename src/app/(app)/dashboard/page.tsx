@@ -1,3 +1,4 @@
+import { Clock, MapPin, Megaphone, Package } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { postAnnouncement } from "@/app/actions/manage";
@@ -16,7 +17,7 @@ export default async function Dashboard() {
       <PageHeader title={`Hi, ${user.name.split(" ")[0]}`} subtitle={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/Chicago" })} />
       {announcements.map((a) => (
         <div key={a.id} className="mb-4 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm">
-          <div className="font-semibold text-brand-700">📣 {a.title}</div>
+          <div className="font-semibold text-slate-900"><Megaphone className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.title}</div>
           <div className="mt-1 text-slate-700">{a.body}</div>
         </div>
       ))}
@@ -45,8 +46,8 @@ async function StaffDash({ userId }: { userId: string }) {
         </Link>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          <Link href="/checkin?mode=pickup" className="card text-center hover:border-brand-500"><div className="text-3xl">📦</div><div className="mt-1 font-semibold">Supply pickup</div></Link>
-          <Link href="/checkin?mode=site" className="card text-center hover:border-brand-500"><div className="text-3xl">📍</div><div className="mt-1 font-semibold">Arrive at site</div></Link>
+          <Link href="/checkin?mode=pickup" className="card text-center hover:border-brand-500"><Package className="mx-auto h-7 w-7" strokeWidth={1.5} /><div className="mt-2 text-sm font-semibold uppercase tracking-wider">Supply pickup</div></Link>
+          <Link href="/checkin?mode=site" className="card text-center hover:border-brand-500"><MapPin className="mx-auto h-7 w-7" strokeWidth={1.5} /><div className="mt-2 text-sm font-semibold uppercase tracking-wider">Arrive at site</div></Link>
         </div>
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -140,7 +141,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
         </div>
       )}
       {!owner && unapproved > 0 && (
-        <Link href="/time" className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">⏱️ {unapproved} time entries waiting for approval →</Link>
+        <Link href="/time" className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><Clock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{unapproved} time entries waiting for approval →</Link>
       )}
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -173,7 +174,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
                   </div>
                 ))}
               </div>
-            ) : <Empty>All check-ins were inside the geofence. 👍</Empty>}
+            ) : <Empty>All check-ins were inside the geofence.</Empty>}
           </div>
           {low.length > 0 && (
             <div>

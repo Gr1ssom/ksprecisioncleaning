@@ -1,3 +1,4 @@
+import { Check, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
@@ -16,8 +17,8 @@ export function Stat({ label, value, hint, href, tone = "slate" }: { label: stri
   const tones = { slate: "text-slate-900", red: "text-red-600", green: "text-emerald-600", amber: "text-amber-600", blue: "text-brand-600" };
   const body = (
     <div className="card h-full">
-      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-1 text-2xl font-bold ${tones[tone]}`}>{value}</div>
+      <div className="eyebrow">{label}</div>
+      <div className={`mt-1 font-serif text-3xl font-black ${tones[tone]}`}>{value}</div>
       {hint && <div className="mt-0.5 text-xs text-slate-500">{hint}</div>}
     </div>
   );
@@ -39,8 +40,8 @@ export function Badge({ value, label }: { value: string; label?: string }) {
 export function FenceBadge({ within, distance }: { within: boolean | null; distance: number | null }) {
   if (within == null) return <span className="badge bg-slate-100 text-slate-500">no GPS</span>;
   return within
-    ? <span className="badge bg-emerald-100 text-emerald-700">✓ on site{distance != null ? ` · ${distance}m` : ""}</span>
-    : <span className="badge bg-red-100 text-red-700">⚠ {distance}m away</span>;
+    ? <span className="badge gap-1 bg-emerald-100 text-emerald-700"><Check className="h-3 w-3" />on site{distance != null ? ` · ${distance}m` : ""}</span>
+    : <span className="badge gap-1 bg-red-100 text-red-700"><TriangleAlert className="h-3 w-3" />{distance}m away</span>;
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {

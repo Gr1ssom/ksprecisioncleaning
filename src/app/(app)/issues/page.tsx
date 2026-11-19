@@ -19,7 +19,7 @@ export default async function Issues({ searchParams }: { searchParams: Promise<{
     <>
       <PageHeader title="Issues" subtitle="Damage, broken fixtures, client requests, safety problems." />
       <details className="card mb-5 max-w-2xl" open={!!sp.new}>
-        <summary className="cursor-pointer font-semibold text-brand-600">＋ Report an issue</summary>
+        <summary className="cursor-pointer font-semibold text-brand-600">Report an issue</summary>
         <form action={reportIssue} className="mt-3 space-y-3">
           {sp.back && <input type="hidden" name="back" value={sp.back} />}
           <input name="title" className="input" placeholder="What's wrong?" required />
@@ -28,13 +28,13 @@ export default async function Issues({ searchParams }: { searchParams: Promise<{
             {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <textarea name="detail" rows={3} className="input" placeholder="Details" />
-          <div><label className="label">Photo</label><input type="file" name="photo" accept="image/*" capture="environment" className="text-sm" /></div>
+          <div><label className="label">Photo</label><input type="file" name="photo" accept="image/*" capture="environment" className="block w-full text-sm text-slate-600 file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-md file:border-0 file:bg-ink file:px-4 file:font-semibold file:text-paper" /></div>
           <button className="btn-primary">Submit</button>
         </form>
       </details>
       <div className="mb-3 flex gap-2 text-sm">
-        <a href="/issues" className={`badge ${status === "OPEN" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>Open</a>
-        <a href="/issues?status=RESOLVED" className={`badge ${status === "RESOLVED" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>Resolved</a>
+        <a href="/issues" className={`chip ${status === "OPEN" ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>Open</a>
+        <a href="/issues?status=RESOLVED" className={`chip ${status === "RESOLVED" ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>Resolved</a>
       </div>
       <div className="space-y-3">
         {issues.map((i) => (

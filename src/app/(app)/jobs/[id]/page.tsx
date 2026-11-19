@@ -1,3 +1,4 @@
+import { BookOpen, KeyRound, StickyNote } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
@@ -40,13 +41,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         subtitle={`${a.serviceType?.name ?? "Clean"} · ${fmtDate(a.date)} · ${a.startTime}${a.endTime ? `–${a.endTime}` : ""} · ${a.user?.name ?? "Unassigned"}`}
         action={<div className="flex items-center gap-2"><Badge value={a.status} />{user.role !== "STAFF" && <Link href={`/jobs/${a.id}/edit`} className="btn-secondary">Edit</Link>}</div>}
       />
-      {sp.done && <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Checked out. Nice work! ✨</div>}
+      {sp.done && <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Checked out. Nice work!</div>}
 
       <div className="mb-5 grid gap-3 md:grid-cols-3">
         <div className="card md:col-span-2">
           <div className="text-xs text-slate-500">{a.location.address}</div>
-          {a.location.accessNotes && <p className="mt-2 text-sm">🔑 {a.location.accessNotes}</p>}
-          {a.notes && <p className="mt-2 text-sm">📝 {a.notes}</p>}
+          {a.location.accessNotes && <p className="mt-2 text-sm"><KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.location.accessNotes}</p>}
+          {a.notes && <p className="mt-2 text-sm"><StickyNote className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.notes}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
             <a className="btn-secondary" target="_blank" rel="noreferrer" href={`https://maps.google.com/?q=${encodeURIComponent(a.location.address)}`}>Directions</a>
             <Link className="btn-secondary" href={`/locations/${a.locationId}`}>Location & SOPs</Link>
@@ -96,8 +97,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         )}
         <section>
           <h2 className="h2 mb-2">SOPs</h2>
-          <div className="card space-y-1 text-sm">
-            {[...a.location.sops, ...companySops].map((s) => <Link key={s.id} href={`/sops#${s.id}`} className="block text-brand-600 hover:underline">📘 {s.title}</Link>)}
+          <div className="card divide-y divide-slate-100 py-1 text-sm">
+            {[...a.location.sops, ...companySops].map((s) => <Link key={s.id} href={`/sops#${s.id}`} className="flex min-h-11 items-center text-slate-800 underline-offset-2 hover:underline"><BookOpen className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{s.title}</Link>)}
           </div>
         </section>
         {a.checkins.length > 0 && (

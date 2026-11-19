@@ -72,7 +72,7 @@ export default async function Clients() {
             <ClientFields c={c} services={services} />
           </details>
         ))}
-        <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">＋ New client</summary><ClientFields services={services} /></details>
+        <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">New client</summary><ClientFields services={services} /></details>
       </div>
     </>
   );

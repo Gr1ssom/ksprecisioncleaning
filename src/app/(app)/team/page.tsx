@@ -45,7 +45,7 @@ export default async function Team() {
             {owner ? <UserForm u={u} owner /> : <p className="mt-2 text-sm text-slate-500">Ask the owner to change this person&apos;s details.</p>}
           </details>
         ))}
-        <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">＋ Add team member</summary><UserForm owner={owner} /></details>
+        <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">Add team member</summary><UserForm owner={owner} /></details>
       </div>
     </>
   );

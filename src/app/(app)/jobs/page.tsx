@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -33,9 +34,9 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
         <Link href={q({ week: offset + 1 })} className="btn-secondary">Next →</Link>
         {!staffView && (
           <div className="flex flex-wrap gap-1 text-sm">
-            <Link href={q({ who: "" })} className={`badge ${!sp.who ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>Everyone</Link>
-            <Link href={q({ who: "open" })} className={`badge ${sp.who === "open" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>Open shifts</Link>
-            {staff.map((s) => <Link key={s.id} href={q({ who: s.id })} className={`badge ${sp.who === s.id ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>{s.name.split(" ")[0]}</Link>)}
+            <Link href={q({ who: "" })} className={`chip ${!sp.who ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>Everyone</Link>
+            <Link href={q({ who: "open" })} className={`chip ${sp.who === "open" ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>Open shifts</Link>
+            {staff.map((s) => <Link key={s.id} href={q({ who: s.id })} className={`chip ${sp.who === s.id ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>{s.name.split(" ")[0]}</Link>)}
           </div>
         )}
       </div>
@@ -47,7 +48,7 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
             <div key={d.toISOString()} className={`rounded-xl border p-2 ${isToday ? "border-brand-500 bg-brand-50" : "border-slate-200 bg-surface"}`}>
               <div className="mb-2 flex items-center justify-between text-xs font-semibold text-slate-600">
                 {d.toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })}
-                {!staffView && <Link href={`/jobs/new?date=${isoDay(d)}`} className="text-brand-600" title="Add job">＋</Link>}
+                {!staffView && <Link href={`/jobs/new?date=${isoDay(d)}`} className="-m-2 flex h-10 w-10 items-center justify-center text-brand-600" title="Add job" aria-label="Add job"><Plus className="h-3.5 w-3.5" /></Link>}
               </div>
               <div className="space-y-1.5">
                 {dayJobs.map((j) => {

@@ -1,3 +1,4 @@
+import { KeyRound, MapPin, Package } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -48,9 +49,9 @@ export default async function CheckinPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
-      <div className="mb-4 inline-flex rounded-lg border border-slate-200 bg-surface p-1 text-sm">
-        <Link href="/checkin?mode=site" className={`rounded-md px-4 py-1.5 ${mode === "site" ? "bg-brand-600 text-white" : "text-slate-600"}`}>📍 Arrive at site</Link>
-        <Link href="/checkin?mode=pickup" className={`rounded-md px-4 py-1.5 ${mode === "pickup" ? "bg-brand-600 text-white" : "text-slate-600"}`}>📦 Supply pickup</Link>
+      <div className="mb-4 grid w-full grid-cols-2 rounded-lg border border-slate-200 bg-surface p-1 text-sm font-semibold sm:inline-grid sm:w-auto">
+        <Link href="/checkin?mode=site" className={`flex min-h-11 items-center justify-center rounded-md px-4 ${mode === "site" ? "bg-ink text-paper" : "text-slate-600"}`}><MapPin className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Arrive at site</Link>
+        <Link href="/checkin?mode=pickup" className={`flex min-h-11 items-center justify-center rounded-md px-4 ${mode === "pickup" ? "bg-ink text-paper" : "text-slate-600"}`}><Package className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Supply pickup</Link>
       </div>
 
       {mode === "site" ? (
@@ -65,7 +66,7 @@ export default async function CheckinPage({ searchParams }: { searchParams: Prom
                 </div>
                 <Badge value={j.status} />
               </div>
-              {j.location.accessNotes && <p className="mt-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">🔑 {j.location.accessNotes}</p>}
+              {j.location.accessNotes && <p className="mt-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600"><KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{j.location.accessNotes}</p>}
               <div className="mt-3">
                 <GeoForm action={siteCheckIn} submitLabel="Check in here">
                   <input type="hidden" name="assignmentId" value={j.id} />

@@ -1,3 +1,4 @@
+import { BookOpen, Handshake, Map as MapIcon } from "lucide-react";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
@@ -23,7 +24,7 @@ export default async function Locations() {
             </div>
             <div className="text-sm text-slate-500">{l.address}</div>
             <div className="mt-2 flex gap-3 text-xs text-slate-500">
-              {l.client && <span>🤝 {l.client.name}</span>}<span>📘 {l._count.sops} SOPs</span><span>🗺️ {l._count.layouts} floor plans</span>
+              {l.client && <span><Handshake className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{l.client.name}</span>}<span><BookOpen className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{l._count.sops} SOPs</span><span><MapIcon className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{l._count.layouts} floor plans</span>
             </div>
           </Link>
         ))}

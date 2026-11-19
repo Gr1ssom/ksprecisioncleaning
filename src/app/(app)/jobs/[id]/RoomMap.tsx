@@ -1,4 +1,5 @@
 "use client";
+import { Play, Square, StickyNote } from "lucide-react";
 import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import { FloorPlan } from "@/components/FloorPlan";
 import { startRoom, stopRoom, toggleRoomTask } from "@/app/actions/field";
@@ -41,7 +42,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
           <div className="flex gap-1">
             {layouts.map((l, i) => (
               <button key={l.id} onClick={() => { setLayoutIdx(i); setSelected(null); }}
-                className={`rounded-md px-3 py-1 text-sm ${i === layoutIdx ? "bg-brand-600 text-white" : "bg-surface text-slate-600 border border-slate-200"}`}>{l.name}</button>
+                className={`min-h-10 rounded-md px-4 text-sm font-semibold ${i === layoutIdx ? "bg-ink text-paper" : "bg-surface text-slate-600 border border-slate-200"}`}>{l.name}</button>
             ))}
           </div>
           <div className="text-xs text-slate-500">{doneRooms}/{allRooms.length} rooms done · tap a room</div>
@@ -52,7 +53,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
           fill={(r) => {
             const mr = r as MapRoom; const p = progress(mr); const t = total(r.id);
             const isActive = optActive?.roomId === r.id;
-            const badge = isActive ? `⏱ ${fmtDur(t)}` : p.of && p.done === p.of ? "✓ done" : p.done ? `${p.done}/${p.of}` : t > 0 ? fmtDur(t) : undefined;
+            const badge = isActive ? `● ${fmtDur(t)}` : p.of && p.done === p.of ? "✓ done" : p.done ? `${p.done}/${p.of}` : t > 0 ? fmtDur(t) : undefined;
             if (isActive) return { fill: "#2563eb", opacity: 0.55, pulse: true, badge };
             if (p.of && p.done === p.of) return { fill: "#16a34a", opacity: 0.5, badge };
             if (p.done || t > 0) return { fill: "#f59e0b", opacity: 0.45, badge };
@@ -78,14 +79,14 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
               </div>
               <span className="mt-1 h-3 w-3 rounded-full" style={{ background: room.color }} />
             </div>
-            {room.notes && <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">📝 {room.notes}</p>}
+            {room.notes && <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800"><StickyNote className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{room.notes}</p>}
             {canWork && (
               <div className="mt-3">
                 {optActive?.roomId === room.id ? (
-                  <button disabled={pending} onClick={() => start(async () => { setOptActive(null); await stopRoom(assignmentId); })} className="btn-danger w-full text-base">⏹ Stop · {fmtDur(total(room.id))}</button>
+                  <button disabled={pending} onClick={() => start(async () => { setOptActive(null); await stopRoom(assignmentId); })} className="btn-danger w-full text-base"><Square className="h-4 w-4 fill-current" /> Stop · {fmtDur(total(room.id))}</button>
                 ) : (
                   <button disabled={pending} onClick={() => start(async () => { setOptActive({ roomId: room.id, startedAt: new Date().toISOString() }); await startRoom(assignmentId, room.id); })} className="btn-success w-full text-base">
-                    ▶ {optActive ? "Switch to this room" : "Start room"}
+                    <Play className="h-4 w-4 fill-current" /> {optActive ? "Switch to this room" : "Start room"}
                   </button>
                 )}
               </div>
@@ -95,8 +96,8 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
                 const on = checked.has(`${room.id}|${t.label}`);
                 return (
                   <li key={t.label}>
-                    <label className={`flex items-start gap-3 rounded-lg p-2 text-sm ${canWork ? "cursor-pointer hover:bg-slate-50" : ""}`}>
-                      <input type="checkbox" className="mt-0.5 h-5 w-5 accent-emerald-600" checked={on} disabled={!canWork}
+                    <label className={`flex min-h-12 items-start gap-3 rounded-lg px-2 py-3 text-base md:min-h-0 md:py-2 md:text-sm ${canWork ? "cursor-pointer hover:bg-slate-50" : ""}`}>
+                      <input type="checkbox" className="mt-0.5 h-6 w-6 accent-emerald-600 md:h-5 md:w-5" checked={on} disabled={!canWork}
                         onChange={() => start(async () => { toggleOpt(`${room.id}|${t.label}`); await toggleRoomTask(assignmentId, room.id, t.label); })} />
                       <span className={on ? "text-slate-400 line-through" : ""}>{t.label}{t.custom && <span className="badge ml-2 bg-purple-100 text-purple-700">this room</span>}</span>
                     </label>

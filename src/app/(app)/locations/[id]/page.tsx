@@ -1,3 +1,4 @@
+import { KeyRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
@@ -28,7 +29,7 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
     <>
       <PageHeader title={loc.name} subtitle={loc.address + (loc.client ? ` · ${loc.client.name}` : "")}
         action={mgr && <Link href={`/jobs/new?locationId=${loc.id}`} className="btn-primary">New job</Link>} />
-      {loc.accessNotes && <div className="card mb-5 text-sm">🔑 {loc.accessNotes}</div>}
+      {loc.accessNotes && <div className="card mb-5 text-sm"><KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{loc.accessNotes}</div>}
 
       <section className="mb-6">
         <div className="mb-2 flex items-center justify-between">
@@ -85,7 +86,7 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
           {loc.sops.length === 0 && <p className="muted">No location-specific SOPs. Company SOPs still apply.</p>}
           {mgr && (
             <details className="card">
-              <summary className="cursor-pointer font-semibold text-brand-600">＋ Add SOP for this location</summary>
+              <summary className="cursor-pointer font-semibold text-brand-600">Add SOP for this location</summary>
               <form action={saveSop} className="mt-3 space-y-2">
                 <input type="hidden" name="locationId" value={loc.id} />
                 <div className="grid grid-cols-2 gap-2"><input name="title" placeholder="Title" className="input" required /><input name="category" placeholder="Category" className="input" /></div>

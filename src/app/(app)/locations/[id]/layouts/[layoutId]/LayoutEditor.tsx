@@ -1,4 +1,5 @@
 "use client";
+import { ImagePlus, MousePointer2, PenLine, RectangleHorizontal, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { FloorPlan } from "@/components/FloorPlan";
@@ -118,10 +119,10 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks }: {
   const draftPoly = mode === "polygon" && draft.length > 0 ? [...draft, ...(hover ? [hover] : [])] : null;
   const rectPreview = mode === "rect" && rectStart && hover ? [[rectStart[0], rectStart[1]], [hover[0], rectStart[1]], [hover[0], hover[1]], [rectStart[0], hover[1]]] : null;
 
-  const tools: { m: Mode; label: string; hint: string }[] = [
-    { m: "select", label: "👆 Select", hint: "Tap a room to edit it. Drag the white dots to reshape." },
-    { m: "rect", label: "▭ Rectangle", hint: "Drag on the plan to draw a rectangular room." },
-    { m: "polygon", label: "✏️ Trace", hint: "Tap each corner of the room. Tap the first dot (or press Finish) to close. Esc cancels." },
+  const tools: { m: Mode; label: string; icon: LucideIcon; hint: string }[] = [
+    { m: "select", label: "Select", icon: MousePointer2, hint: "Tap a room to edit it. Drag the white dots to reshape." },
+    { m: "rect", label: "Rectangle", icon: RectangleHorizontal, hint: "Drag on the plan to draw a rectangular room." },
+    { m: "polygon", label: "Trace", icon: PenLine, hint: "Tap each corner of the room. Tap the first dot (or press Finish) to close. Esc cancels." },
   ];
 
   return (
@@ -130,10 +131,10 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks }: {
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <input className="input w-44" value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} />
           {tools.map((t) => (
-            <button key={t.m} onClick={() => { setMode(t.m); setDraft([]); }} className={mode === t.m ? "btn-primary" : "btn-secondary"}>{t.label}</button>
+            <button key={t.m} onClick={() => { setMode(t.m); setDraft([]); }} className={mode === t.m ? "btn-primary" : "btn-secondary"}><t.icon className="h-4 w-4" />{t.label}</button>
           ))}
           {mode === "polygon" && draft.length >= 3 && <button onClick={finishPolygon} className="btn-success">Finish room</button>}
-          <label className="btn-secondary">🖼️ {imageData ? "Replace plan" : "Upload plan"}
+          <label className="btn-secondary"><ImagePlus className="h-4 w-4" />{imageData ? "Replace plan" : "Upload plan"}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onImage(e.target.files[0])} />
           </label>
           {imageData && <button className="btn-secondary" onClick={() => { setImageData(null); setDirty(true); }}>Remove image</button>}
@@ -154,7 +155,7 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks }: {
           overlay={<>
             {selected && mode === "select" && selected.points.map((p, i) => (
               <div key={i} onPointerDown={(e) => { e.stopPropagation(); canvas.current!.setPointerCapture(e.pointerId); setDrag({ key: selected.key, idx: i }); }}
-                className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full border-2 border-[#0f172a] bg-white shadow"
+                className="absolute h-7 w-7 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full border-2 border-[#0f172a] bg-white shadow md:h-4 md:w-4"
                 style={{ left: `${p[0]}%`, top: `${p[1]}%` }} />
             ))}
             {mode === "polygon" && draft.map((p, i) => (
