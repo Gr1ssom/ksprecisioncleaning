@@ -6,7 +6,8 @@ import { requireUser } from "@/lib/auth";
 import { fromLocalInput } from "@/lib/format";
 import { removeImages, uploadDataUrl } from "@/lib/storage";
 import type { Role } from "@/lib/session";
-import type { Assignment, TaskDef } from "@/lib/types";
+import { assignableRoles, canManage } from "@/lib/team";
+import type { Assignment, Profile, TaskDef } from "@/lib/types";
 
 const s = (f: FormData, k: string) => (String(f.get(k) ?? "").trim() || null);
 const n = (f: FormData, k: string) => { const v = s(f, k); return v == null ? null : Number(v); };
@@ -241,37 +242,111 @@ export async function saveServiceType(form: FormData) {
 }
 
 // ---------- Team: Supabase Auth logins + staff profiles ----------
-export async function saveUser(form: FormData) {
+type TeamResult = { error?: string; ok?: string; tempPassword?: string };
+
+async function loadTarget(id: string) {
+  return must(await admin().from("User").select("*").eq("id", id).single(), "team member") as Profile;
+}
+async function ownerCount() {
+  return (await admin().from("User").select("id", { count: "exact", head: true }).eq("role", "OWNER").eq("active", true)).count ?? 0;
+}
+/** Has this person any work history (which must be kept for payroll and records)? */
+async function hasHistory(id: string) {
+  const sb = admin();
+  const counts = await Promise.all([
+    sb.from("TimeEntry").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("Checkin").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("Assignment").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("Issue").select("id", { count: "exact", head: true }).eq("reportedById", id),
+    sb.from("RoomSession").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("RoomPhoto").select("id", { count: "exact", head: true }).eq("userId", id),
+  ]);
+  return counts.some((c) => (c.count ?? 0) > 0);
+}
+
+/** Add an employee (creates their Supabase login, email already confirmed) or update one. */
+export async function saveUser(_: unknown, form: FormData): Promise<TeamResult> {
   const me = await requireUser("MANAGER");
   const sb = admin();
   const id = s(form, "id");
-  let role = (s(form, "role") ?? "STAFF") as Role;
-  if (me.role !== "OWNER") role = "STAFF";
-  const email = String(form.get("email")).trim().toLowerCase();
-  const active = form.get("active") !== "off";
-  const profile = {
-    name: String(form.get("name")).trim(), email, phone: s(form, "phone"), role, waveEmployeeId: s(form, "waveEmployeeId"), active,
-    ...(me.role === "OWNER" ? { hourlyRate: n(form, "hourlyRate") ?? 0 } : {}),
-  };
+  const role = (s(form, "role") ?? "STAFF") as Role;
+  if (!assignableRoles(me).includes(role)) return { error: "You can't give that access level. Ask the owner." };
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const name = String(form.get("name") ?? "").trim();
+  if (!name || !email) return { error: "Enter a name and an email." };
+  const profile: Record<string, unknown> = { name, email, phone: s(form, "phone"), role, waveEmployeeId: s(form, "waveEmployeeId") };
+  if (me.role === "OWNER" && form.has("hourlyRate")) profile.hourlyRate = n(form, "hourlyRate") ?? 0;
   const pw = s(form, "password");
-  if (pw && pw.length < 8) throw new Error("Passwords need at least 8 characters.");
+  if (pw && pw.length < 8) return { error: "Passwords need at least 8 characters." };
+
   if (id) {
-    if (me.role !== "OWNER") throw new Error("Only the owner can edit team members.");
-    const { error } = await sb.auth.admin.updateUserById(id, {
-      email, email_confirm: true, ...(pw ? { password: pw } : {}),
-      ban_duration: active ? "none" : "876000h", // a deactivated login can't sign in
-    });
-    if (error) throw new Error(`Login update failed: ${error.message}`);
-    must(await sb.from("User").update(profile).eq("id", id), "save team member");
-  } else {
-    if (!pw) throw new Error("Set a starting password (8+ characters).");
-    const { data, error } = await sb.auth.admin.createUser({ email, password: pw, email_confirm: true, user_metadata: { name: profile.name } });
-    if (error || !data.user) throw new Error(`Couldn't create the login: ${error?.message ?? "unknown error"}`);
-    const ins = await sb.from("User").insert({ id: data.user.id, ...profile, hourlyRate: profile.hourlyRate ?? 0 });
-    if (ins.error) {
-      await sb.auth.admin.deleteUser(data.user.id); // don't leave a login without a profile
-      throw new Error(`Couldn't save the team member: ${ins.error.message}`);
-    }
+    const target = await loadTarget(id);
+    if (!canManage(me, target) && target.id !== me.id) return { error: "You can't edit this person. Ask the owner." };
+    if (target.id === me.id && role !== me.role) return { error: "You can't change your own access level." };
+    if (target.role === "OWNER" && role !== "OWNER" && (await ownerCount()) <= 1) return { error: "This is the only owner. Make someone else an owner first." };
+    const { error } = await sb.auth.admin.updateUserById(id, { email, email_confirm: true, ...(pw ? { password: pw } : {}) });
+    if (error) return { error: `Couldn't update the login: ${error.message}` };
+    const up = await sb.from("User").update(profile).eq("id", id);
+    if (up.error) return { error: `Couldn't save: ${up.error.message}` };
+    revalidatePath("/team", "layout");
+    return { ok: "Saved." };
   }
-  done("/team");
+
+  if (!pw) return { error: "Set a starting password (8+ characters) and give it to them." };
+  const { data, error } = await sb.auth.admin.createUser({ email, password: pw, email_confirm: true, user_metadata: { name } });
+  if (error || !data.user) return { error: error?.message?.includes("already") ? "Someone already uses that email." : `Couldn't create the login: ${error?.message ?? "unknown error"}` };
+  const ins = await sb.from("User").insert({ id: data.user.id, hourlyRate: 0, ...profile });
+  if (ins.error) {
+    await sb.auth.admin.deleteUser(data.user.id); // don't leave a login without a profile
+    return { error: `Couldn't save the team member: ${ins.error.message}` };
+  }
+  revalidatePath("/team", "layout");
+  redirect(`/team/${data.user.id}?added=1`);
+}
+
+/** Turn a login off (blocked at Supabase Auth, history kept) or back on. */
+export async function setUserActive(id: string, active: boolean): Promise<TeamResult> {
+  const me = await requireUser("MANAGER");
+  const target = await loadTarget(id);
+  if (target.id === me.id) return { error: "You can't turn off your own login." };
+  if (!canManage(me, target)) return { error: "You can't change this person. Ask the owner." };
+  if (!active && target.role === "OWNER" && (await ownerCount()) <= 1) return { error: "This is the only owner and can't be turned off." };
+  const { error } = await admin().auth.admin.updateUserById(id, { ban_duration: active ? "none" : "876000h" });
+  if (error) return { error: `Couldn't update the login: ${error.message}` };
+  must(await admin().from("User").update({ active }).eq("id", id), "save status");
+  revalidatePath("/team", "layout");
+  return { ok: active ? "Login turned back on." : "Login turned off. Their history is kept." };
+}
+
+/** Set a temporary password for someone who's locked out. Returned once to show the manager. */
+export async function resetPassword(id: string): Promise<TeamResult> {
+  const me = await requireUser("MANAGER");
+  const target = await loadTarget(id);
+  if (!canManage(me, target)) return { error: "You can't reset this person's password. Ask the owner." };
+  const words = ["Mop", "Shine", "Fresh", "Sparkle", "Clean", "Polish", "Bright", "Tidy"];
+  const temp = `${words[Math.floor(Math.random() * words.length)]}-${crypto.randomUUID().slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const { error } = await admin().auth.admin.updateUserById(id, { password: temp });
+  if (error) return { error: `Couldn't reset the password: ${error.message}` };
+  return { ok: "Temporary password set. Give it to them; they can sign in with it right away.", tempPassword: temp };
+}
+
+/** Remove someone. With work history they're turned off instead (records are kept for payroll). */
+export async function removeUser(id: string): Promise<TeamResult> {
+  const me = await requireUser("MANAGER");
+  const target = await loadTarget(id);
+  if (target.id === me.id) return { error: "You can't remove yourself." };
+  if (!canManage(me, target)) return { error: "You can't remove this person. Ask the owner." };
+  if (target.role === "OWNER" && (await ownerCount()) <= 1) return { error: "This is the only owner and can't be removed." };
+  if (await hasHistory(id)) {
+    const r = await setUserActive(id, false);
+    return r.error ? r : { ok: "They have work history, so their login was turned off instead of deleted. Hours and jobs stay for payroll." };
+  }
+  const sb = admin();
+  await sb.from("SopAck").delete().eq("userId", id);
+  await sb.from("Assignment").update({ createdById: null }).eq("createdById", id);
+  must(await sb.from("User").delete().eq("id", id), "remove profile");
+  const { error } = await sb.auth.admin.deleteUser(id);
+  if (error) return { error: `Profile removed, but the login couldn't be deleted: ${error.message}` };
+  revalidatePath("/team", "layout");
+  redirect("/team?removed=1");
 }

@@ -47,8 +47,13 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
 ## Roles
 - `STAFF` < `MANAGER` < `OWNER` (`src/lib/session.ts`). Pages call `requireUser("MANAGER")` etc.;
   server actions check again themselves. Never rely on hiding a link.
-- Owner only: payroll, pay rates, changing roles, editing team members. Managers: scheduling,
-  locations, floor plans, SOPs, inventory, time approval, clients, invoices; they can add staff.
+- Owner only: payroll, pay rates, and managing managers/owners. Managers: scheduling, locations,
+  floor plans, SOPs, inventory, time approval, clients, invoices, and managing **staff**.
+- Team management rules live in `src/lib/team.ts` (`canManage`, `assignableRoles`, `ACCESS_MATRIX`,
+  shown on the Team page). Nobody changes their own access level or turns off their own login; the
+  last active owner can't be demoted, turned off or removed. "Remove" deletes only people with no
+  work history; anyone with history is turned off instead (login banned, `active = false`) so
+  payroll and job records stay intact.
 - New sidebar pages go in `ITEMS` in `src/components/Nav.tsx` with the lowest role that may see them,
   and the page itself must call `requireUser` with that same role.
 
