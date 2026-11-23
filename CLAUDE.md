@@ -75,8 +75,12 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   last active owner can't be demoted, turned off or removed. "Remove" deletes only people with no
   work history; anyone with history is turned off instead (login banned, `active = false`) so
   payroll and job records stay intact.
-- New sidebar pages go in `ITEMS` in `src/components/Nav.tsx` with the lowest role that may see them,
-  and the page itself must call `requireUser` with that same role.
+- Navigation lives in `src/lib/nav.ts`. Staff get a short flat list. Managers and the owner get nine
+  sidebar entries; related pages share one entry and switch with tabs (`SectionTabs`, rendered by
+  the app layout): Clients | Locations | SOPs, Hours | Payroll, and More (Reports | Activity |
+  Issues | Settings | My account). A new page goes into the section it belongs to, with the lowest
+  role that may see it, and the page itself must call `requireUser` with that same role. Add a new
+  top-level entry only when nothing fits.
 
 ## Integrations
 - **Wave Accounting** (`src/lib/wave.ts`): public GraphQL API. Invoices are created, approved and
@@ -164,7 +168,8 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   page). Keep `viewportFit: cover` and the `pt-safe`/`pb-safe` safe-area padding on fixed bars.
 - Tap targets are at least 44px on phones: use `btn-*`, `input`, `chip`; checklist rows are
   `min-h-12`. Inputs are 16px on phones so iOS doesn't zoom. Compact sizes only from `md:` up.
-- The bottom tab bar holds the four staff essentials + More (every other page for the role).
+- The bottom tab bar holds four essentials (staff: Locations fourth; managers and owner: Clients)
+  + More, a sheet with every other page for the role, one tap each.
 - Run the tap audit (every interactive element ≥ 40px, no sideways scroll at 390px) on screens you
   change, for staff and manager.
 

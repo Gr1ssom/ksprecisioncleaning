@@ -2,43 +2,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
-  LayoutDashboard, MapPin, CalendarDays, Building2, BookOpen, TriangleAlert, Clock, Package,
-  BarChart3, Handshake, Receipt, Users, Settings, Wallet, Menu, X, LogOut, History, UserCog, type LucideIcon,
-} from "lucide-react";
+import { Menu, X, LogOut } from "lucide-react";
 import type { Role } from "@/lib/session";
+import { itemActive, navFor, onPage, pagesFor } from "@/lib/nav";
 import { Logo } from "./Logo";
 import pkg from "../../package.json";
 
-type Item = { href: string; label: string; icon: LucideIcon; min: Role; mobile?: boolean };
-const ITEMS: Item[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, min: "STAFF", mobile: true },
-  { href: "/checkin", label: "Check in", icon: MapPin, min: "STAFF", mobile: true },
-  { href: "/jobs", label: "Jobs", icon: CalendarDays, min: "STAFF", mobile: true },
-  { href: "/locations", label: "Locations", icon: Building2, min: "STAFF", mobile: true },
-  { href: "/sops", label: "SOPs", icon: BookOpen, min: "STAFF" },
-  { href: "/issues", label: "Issues", icon: TriangleAlert, min: "STAFF" },
-  { href: "/time", label: "Hours", icon: Clock, min: "STAFF" },
-  { href: "/inventory", label: "Inventory", icon: Package, min: "MANAGER" },
-  { href: "/reports", label: "Reports", icon: BarChart3, min: "MANAGER" },
-  { href: "/clients", label: "Clients", icon: Handshake, min: "MANAGER" },
-  { href: "/invoices", label: "Invoices", icon: Receipt, min: "MANAGER" },
-  { href: "/team", label: "Team", icon: Users, min: "MANAGER" },
-  { href: "/settings", label: "Settings", icon: Settings, min: "MANAGER" },
-  { href: "/payroll", label: "Payroll", icon: Wallet, min: "OWNER" },
-  { href: "/activity", label: "Activity", icon: History, min: "OWNER" },
-  { href: "/account", label: "My account", icon: UserCog, min: "STAFF" },
-];
-const rank = { STAFF: 1, MANAGER: 2, OWNER: 3 } as const;
-
 export function Nav({ role, name, logout }: { role: Role; name: string; logout: () => Promise<void> }) {
   const path = usePathname();
-  const items = ITEMS.filter((i) => rank[role] >= rank[i.min]);
-  const active = (h: string) => path === h || path.startsWith(h + "/");
+  const items = navFor(role);
   const [more, setMore] = useState(false);
   useEffect(() => setMore(false), [path]);
   const tabs = items.filter((i) => i.mobile);
-  const moreActive = !tabs.some((t) => active(t.href));
+  // Phone "More" sheet: every other page, with sections opened out so each is one tap away.
+  const rest = pagesFor(items.filter((i) => !i.mobile));
+  const moreActive = !tabs.some((t) => itemActive(path, t));
   return (
     <>
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-slate-200 bg-surface md:flex">
@@ -49,8 +27,8 @@ export function Nav({ role, name, logout }: { role: Role; name: string; logout: 
         <nav className="flex-1 space-y-0.5 overflow-y-auto border-t border-slate-200 p-3">
           {items.map((i) => (
             <Link key={i.href} href={i.href}
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm ${active(i.href) ? "bg-ink font-semibold text-paper" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
-              <i.icon className="h-4 w-4 shrink-0" strokeWidth={active(i.href) ? 2.25 : 1.75} />{i.label}
+              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm ${itemActive(path, i) ? "bg-ink font-semibold text-paper" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
+              <i.icon className="h-4 w-4 shrink-0" strokeWidth={itemActive(path, i) ? 2.25 : 1.75} />{i.label}
             </Link>
           ))}
         </nav>
@@ -74,8 +52,8 @@ export function Nav({ role, name, logout }: { role: Role; name: string; logout: 
       <nav className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-surface/95 backdrop-blur md:hidden">
         <div className="grid grid-cols-5">
           {tabs.map((i) => (
-            <Link key={i.href} href={i.href} className={`flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${active(i.href) ? "text-slate-900" : "text-slate-400"}`}>
-              <i.icon className="h-6 w-6" strokeWidth={active(i.href) ? 2.25 : 1.75} />{i.label}
+            <Link key={i.href} href={i.href} className={`flex min-h-14 flex-col items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${itemActive(path, i) ? "text-slate-900" : "text-slate-400"}`}>
+              <i.icon className="h-6 w-6" strokeWidth={itemActive(path, i) ? 2.25 : 1.75} />{i.label}
             </Link>
           ))}
           <button onClick={() => setMore((m) => !m)} aria-expanded={more}
@@ -93,9 +71,9 @@ export function Nav({ role, name, logout }: { role: Role; name: string; logout: 
               <div><div className="font-semibold">{name}</div><div className="eyebrow text-[10px]">{role.toLowerCase()} · v{pkg.version}</div></div>
             </div>
             <div className="grid grid-cols-3 gap-2 px-4 pb-3">
-              {items.filter((i) => !i.mobile).map((i) => (
+              {rest.map((i) => (
                 <Link key={i.href} href={i.href}
-                  className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border text-xs font-semibold ${active(i.href) ? "border-ink bg-ink text-paper" : "border-slate-200 text-slate-800 active:bg-slate-100"}`}>
+                  className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border text-xs font-semibold ${onPage(path, i.href) ? "border-ink bg-ink text-paper" : "border-slate-200 text-slate-800 active:bg-slate-100"}`}>
                   <i.icon className="h-6 w-6" strokeWidth={1.75} />{i.label}
                 </Link>
               ))}
