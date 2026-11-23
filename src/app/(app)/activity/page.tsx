@@ -9,7 +9,10 @@ export const dynamic = "force-dynamic";
 
 const AREAS: [string, string][] = [["", "Everything"], ["TimeEntry", "Hours"], ["User", "Team"], ["Client", "Prices"], ["Invoice", "Invoices"], ["Supply", "Stock"], ["Location", "Locations"], ["Sop", "SOPs"], ["Assignment", "Jobs"], ["ServiceType", "Services"]];
 
-const show = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
+const show = (v: unknown) =>
+  v === null || v === undefined || v === "" ? "—"
+  : typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? fmtDateTime(v)
+  : typeof v === "object" ? JSON.stringify(v) : String(v);
 
 export default async function Activity({ searchParams }: { searchParams: Promise<{ tab?: string; area?: string }> }) {
   await requireUser("OWNER");

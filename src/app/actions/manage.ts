@@ -204,8 +204,9 @@ export async function editTime(form: FormData) {
   const next = { clockIn: fromLocalInput(String(form.get("clockIn"))).toISOString(), clockOut: out ? fromLocalInput(out).toISOString() : null, note: s(form, "note") };
   // Edited entries need re-approval.
   must(await admin().from("TimeEntry").update({ ...next, approved: false }).eq("id", id), "save time");
-  const norm = (v: string | null) => (v ? new Date(v).toISOString() : null);
-  const ch = diff({ clockIn: norm(prev.clockIn), clockOut: norm(prev.clockOut), note: prev.note }, next);
+  // The form edits to the minute, so compare to the minute (no phantom "changed by 53 seconds").
+  const norm = (v: string | null) => (v ? new Date(Math.floor(Date.parse(v) / 60000) * 60000).toISOString() : null);
+  const ch = diff({ clockIn: norm(prev.clockIn), clockOut: norm(prev.clockOut), note: prev.note }, { ...next, clockIn: norm(next.clockIn), clockOut: norm(next.clockOut) });
   if (ch.after) await audit(me, "time.edit", "TimeEntry", id, `Edited ${prev.user.name}'s hours${next.note ? `: ${next.note}` : ""}`, ch);
   revalidatePath("/time");
 }
@@ -244,7 +245,10 @@ export async function saveClient(form: FormData) {
   const after: Record<string, number | null> = { ...before };
   for (const r of set) after[r.serviceTypeId] = r.price;
   for (const u of unset) after[u] = null;
-  const ch = diff(before, Object.fromEntries(Object.entries(after).filter(([k, v]) => v !== null || k in before)));
+  // Log prices by service name ("Deep clean: 420 → 450"), not internal ids.
+  const names = Object.fromEntries((must(await sb.from("ServiceType").select("id, name"), "services") as { id: string; name: string }[]).map((t) => [t.id, t.name]));
+  const byName = (o: Record<string, number | null>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [names[k] ?? k, v]));
+  const ch = diff(byName(before), byName(Object.fromEntries(Object.entries(after).filter(([k, v]) => v !== null || k in before))));
   if (!id) await audit(me, "client.create", "Client", client.id, `Added client ${data.name}`, { after: ch.after });
   else if (ch.after) await audit(me, "client.prices", "Client", client.id, `Changed prices for ${data.name}`, ch);
   done("/clients");
