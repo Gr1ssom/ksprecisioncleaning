@@ -1,12 +1,16 @@
+import { BookOpen, KeyRound, StickyNote } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import { usualRoomMinutes } from "@/lib/reports";
+import { signedUrls } from "@/lib/storage";
+import type { Assignment, Checkin, Location, Profile, RoomPhoto, RoomSession, RoomTaskCheck, ServiceType, Sop, TimeEntry } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { layoutsWithTasks } from "@/lib/rooms";
 import { Badge, FenceBadge, PageHeader } from "@/components/ui";
 import { GeoForm } from "@/components/GeoForm";
 import { siteCheckIn, siteCheckOut } from "@/app/actions/field";
-import { fmtDate, fmtDateTime, hoursBetween, type Task } from "@/lib/format";
+import { fmtDate, fmtDateTime, hoursBetween } from "@/lib/format";
 import { RoomMap } from "./RoomMap";
 import { TaskList, StatusButtons } from "./JobControls";
 
@@ -16,22 +20,35 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const user = await requireUser();
   const { id } = await params;
   const sp = await searchParams;
-  const a = await db.assignment.findUnique({
-    where: { id },
-    include: { location: { include: { sops: true } }, user: true, serviceType: true, checkins: { include: { user: true }, orderBy: { at: "asc" } }, timeEntry: true, roomSessions: true, roomChecks: true },
-  });
-  if (!a) notFound();
+  const sb = admin();
+  type TE = TimeEntry;
+  const raw = must(await sb.from("Assignment").select(`*, location:Location(*, sops:Sop(id, title)), user:User!Assignment_userId_fkey(name),
+      serviceType:ServiceType(name), checkins:Checkin(*, user:User(name)), timeEntry:TimeEntry(*), roomSessions:RoomSession(*), roomChecks:RoomTaskCheck(*), roomPhotos:RoomPhoto(*)`)
+    .eq("id", id).maybeSingle(), "job") as (Assignment & {
+      location: Location & { sops: Pick<Sop, "id" | "title">[] }; user: Pick<Profile, "name"> | null; serviceType: Pick<ServiceType, "name"> | null;
+      checkins: (Checkin & { user: Pick<Profile, "name"> })[]; timeEntry: TE | TE[] | null; roomSessions: RoomSession[]; roomChecks: RoomTaskCheck[]; roomPhotos: RoomPhoto[];
+    }) | null;
+  if (!raw) notFound();
+  const a = { ...raw, timeEntry: Array.isArray(raw.timeEntry) ? raw.timeEntry[0] ?? null : raw.timeEntry };
+  a.checkins.sort((x, y) => x.at.localeCompare(y.at));
   if (user.role === "STAFF" && a.userId !== user.id && a.userId !== null) notFound();
-  const layouts = await layoutsWithTasks(a.locationId);
-  const companySops = await db.sop.findMany({ where: { locationId: null }, select: { id: true, title: true } });
+  const layouts = await layoutsWithTasks(a.locationId, a.serviceTypeId);
+  const [companySops, usual, photoUrls] = await Promise.all([
+    sb.from("Sop").select("id, title").is("locationId", null).then((r) => must(r, "SOPs") as Pick<Sop, "id" | "title">[]),
+    usualRoomMinutes(layouts.flatMap((l) => l.rooms.map((r) => r.id))),
+    signedUrls(a.roomPhotos.map((p) => p.path)),
+  ]);
+  const photos: Record<string, { id: string; kind: "before" | "after"; url: string }[]> = {};
+  for (const p of [...a.roomPhotos].sort((x, y) => x.createdAt.localeCompare(y.createdAt)))
+    if (photoUrls[p.path]) (photos[p.roomId] ??= []).push({ id: p.id, kind: p.kind, url: photoUrls[p.path] });
 
   const mine = a.userId === user.id || user.role !== "STAFF";
   const inProgress = a.status === "IN_PROGRESS";
   const canWork = inProgress && mine;
   const spentSec: Record<string, number> = {};
-  for (const s of a.roomSessions) if (s.endedAt) spentSec[s.roomId] = (spentSec[s.roomId] ?? 0) + (s.endedAt.getTime() - s.startedAt.getTime()) / 1000;
+  for (const s of a.roomSessions) if (s.endedAt) spentSec[s.roomId] = (spentSec[s.roomId] ?? 0) + (Date.parse(s.endedAt) - Date.parse(s.startedAt)) / 1000;
   const open = a.roomSessions.find((s) => !s.endedAt && (s.userId === user.id || user.role !== "STAFF"));
-  const tasks = (a.tasks as Task[]) ?? [];
+  const tasks = a.tasks ?? [];
 
   return (
     <>
@@ -40,13 +57,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         subtitle={`${a.serviceType?.name ?? "Clean"} · ${fmtDate(a.date)} · ${a.startTime}${a.endTime ? `–${a.endTime}` : ""} · ${a.user?.name ?? "Unassigned"}`}
         action={<div className="flex items-center gap-2"><Badge value={a.status} />{user.role !== "STAFF" && <Link href={`/jobs/${a.id}/edit`} className="btn-secondary">Edit</Link>}</div>}
       />
-      {sp.done && <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Checked out. Nice work! ✨</div>}
+      {sp.done && <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Checked out. Nice work!</div>}
 
       <div className="mb-5 grid gap-3 md:grid-cols-3">
         <div className="card md:col-span-2">
           <div className="text-xs text-slate-500">{a.location.address}</div>
-          {a.location.accessNotes && <p className="mt-2 text-sm">🔑 {a.location.accessNotes}</p>}
-          {a.notes && <p className="mt-2 text-sm">📝 {a.notes}</p>}
+          {a.location.accessNotes && <p className="mt-2 text-sm"><KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.location.accessNotes}</p>}
+          {a.notes && <p className="mt-2 text-sm"><StickyNote className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.notes}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
             <a className="btn-secondary" target="_blank" rel="noreferrer" href={`https://maps.google.com/?q=${encodeURIComponent(a.location.address)}`}>Directions</a>
             <Link className="btn-secondary" href={`/locations/${a.locationId}`}>Location & SOPs</Link>
@@ -81,7 +98,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           {!inProgress && a.status === "SCHEDULED" && <p className="muted mb-2">Check in to start room timers and tick off tasks.</p>}
           <RoomMap assignmentId={a.id} layouts={layouts.filter((l) => l.rooms.length)} canWork={canWork}
             checks={a.roomChecks.map((c) => `${c.roomId}|${c.label}`)} spentSec={spentSec}
-            active={open ? { roomId: open.roomId, startedAt: open.startedAt.toISOString() } : null} />
+            active={open ? { roomId: open.roomId, startedAt: open.startedAt } : null} usual={usual} photos={photos} />
         </section>
       ) : user.role !== "STAFF" ? (
         <p className="muted mb-6">No floor plan yet. <Link className="text-brand-600 underline" href={`/locations/${a.locationId}`}>Trace one on the location</Link> to unlock the room map and room timers.</p>
@@ -96,8 +113,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         )}
         <section>
           <h2 className="h2 mb-2">SOPs</h2>
-          <div className="card space-y-1 text-sm">
-            {[...a.location.sops, ...companySops].map((s) => <Link key={s.id} href={`/sops#${s.id}`} className="block text-brand-600 hover:underline">📘 {s.title}</Link>)}
+          <div className="card divide-y divide-slate-100 py-1 text-sm">
+            {[...a.location.sops, ...companySops].map((s) => <Link key={s.id} href={`/sops#${s.id}`} className="flex min-h-11 items-center text-slate-800 underline-offset-2 hover:underline"><BookOpen className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{s.title}</Link>)}
           </div>
         </section>
         {a.checkins.length > 0 && (

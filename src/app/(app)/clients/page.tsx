@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Client, ClientRate, Location, ServiceType } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { saveClient } from "@/app/actions/manage";
@@ -43,10 +44,14 @@ function ClientFields({ c, services }: { c?: C; services: Svc[] }) {
 
 export default async function Clients() {
   await requireUser("MANAGER");
-  const [clients, services] = await Promise.all([
-    db.client.findMany({ include: { locations: true, rates: true, invoices: { where: { status: "SENT" } } }, orderBy: { name: "asc" } }),
-    db.serviceType.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+  const sb = admin();
+  const [c, st] = await Promise.all([
+    sb.from("Client").select("*, locations:Location(id), rates:ClientRate(*), invoices:Invoice(id, status)").order("name"),
+    sb.from("ServiceType").select("*").eq("active", true).order("sortOrder").order("name"),
   ]);
+  const services = must(st, "services") as ServiceType[];
+  const clients = (must(c, "clients") as (Client & { locations: Pick<Location, "id">[]; rates: ClientRate[]; invoices: { id: string; status: string }[] })[])
+    .map((x) => ({ ...x, invoices: x.invoices.filter((i) => i.status === "SENT") }));
   return (
     <>
       <PageHeader title="Clients" />
@@ -72,7 +77,7 @@ export default async function Clients() {
             <ClientFields c={c} services={services} />
           </details>
         ))}
-        <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">＋ New client</summary><ClientFields services={services} /></details>
+        <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">New client</summary><ClientFields services={services} /></details>
       </div>
     </>
   );

@@ -1,26 +1,30 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import bcrypt from "bcryptjs";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
-import type { Role } from "@/lib/session";
 import { fromLocalInput } from "@/lib/format";
+import { removeImages, uploadDataUrl } from "@/lib/storage";
+import type { Role } from "@/lib/session";
+import { assignableRoles, canManage } from "@/lib/team";
+import type { Assignment, Profile, TaskDef } from "@/lib/types";
 
 const s = (f: FormData, k: string) => (String(f.get(k) ?? "").trim() || null);
 const n = (f: FormData, k: string) => { const v = s(f, k); return v == null ? null : Number(v); };
 const lines = (v: string | null) => (v ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
 const done = (path: string) => { revalidatePath("/", "layout"); redirect(path); };
+const addDays = (iso: string, d: number) => new Date(Date.parse(iso + "T00:00:00Z") + d * 86400_000).toISOString().slice(0, 10);
 
 // ---------- Assignments ----------
 export async function saveAssignment(form: FormData) {
   const me = await requireUser("MANAGER");
+  const sb = admin();
   const id = s(form, "id");
   const data = {
     locationId: String(form.get("locationId")),
     serviceTypeId: s(form, "serviceTypeId"),
     userId: s(form, "userId"),
-    date: new Date(String(form.get("date")) + "T00:00:00Z"),
+    date: String(form.get("date")),
     startTime: String(form.get("startTime") || "09:00"),
     endTime: s(form, "endTime"),
     notes: s(form, "notes"),
@@ -28,78 +32,96 @@ export async function saveAssignment(form: FormData) {
   const taskLabels = lines(s(form, "tasks"));
   const repeat = Math.min(Math.max(Number(form.get("repeatWeeks") || 0), 0), 26);
   if (id) {
-    const prev = await db.assignment.findUniqueOrThrow({ where: { id } });
-    const old = (prev.tasks as { label: string; done: boolean }[]) ?? [];
-    const tasks = taskLabels.map((label) => ({ label, done: old.find((t) => t.label === label)?.done ?? false }));
-    await db.assignment.update({ where: { id }, data: { ...data, tasks } });
+    const prev = must(await sb.from("Assignment").select("tasks").eq("id", id).single(), "job") as Pick<Assignment, "tasks">;
+    const tasks = taskLabels.map((label) => ({ label, done: prev.tasks?.find((t) => t.label === label)?.done ?? false }));
+    must(await sb.from("Assignment").update({ ...data, tasks }).eq("id", id), "save job");
     return done(`/jobs/${id}`);
   }
   const tasks = taskLabels.map((label) => ({ label, done: false }));
-  for (let w = 0; w <= repeat; w++) {
-    await db.assignment.create({ data: { ...data, date: new Date(data.date.getTime() + w * 7 * 86400_000), tasks, createdById: me.id } });
-  }
+  const rows = Array.from({ length: repeat + 1 }, (_, w) => ({ ...data, date: addDays(data.date, w * 7), tasks, createdById: me.id }));
+  must(await sb.from("Assignment").insert(rows), "create job");
   done("/jobs");
 }
 
 export async function setAssignmentStatus(id: string, status: "SCHEDULED" | "CANCELLED" | "MISSED" | "COMPLETED") {
   await requireUser("MANAGER");
-  await db.assignment.update({ where: { id }, data: { status } });
+  must(await admin().from("Assignment").update({ status }).eq("id", id), "update job");
   revalidatePath("/", "layout");
 }
 
-// ---------- Locations / SOPs / layouts ----------
+// ---------- Locations / SOPs ----------
 export async function saveLocation(form: FormData) {
   await requireUser("MANAGER");
   const id = s(form, "id");
   const data = {
     name: String(form.get("name")), address: String(form.get("address")),
     latitude: n(form, "latitude"), longitude: n(form, "longitude"), geofenceM: n(form, "geofenceM") ?? 150,
-    accessNotes: s(form, "accessNotes"), clientId: s(form, "clientId"),
-    active: form.get("active") !== "off",
+    accessNotes: s(form, "accessNotes"), clientId: s(form, "clientId"), active: form.get("active") !== "off",
   };
-  const loc = id ? await db.location.update({ where: { id }, data }) : await db.location.create({ data });
+  const sb = admin();
+  const loc = must(id ? await sb.from("Location").update(data).eq("id", id).select("id").single() : await sb.from("Location").insert(data).select("id").single(), "save location") as { id: string };
   done(`/locations/${loc.id}`);
 }
 
 export async function saveSop(form: FormData) {
   await requireUser("MANAGER");
+  const sb = admin();
   const id = s(form, "id");
   const data = { title: String(form.get("title")), category: s(form, "category") ?? "General", body: String(form.get("body") ?? ""), locationId: s(form, "locationId") };
-  if (id) await db.sop.update({ where: { id }, data: { ...data, version: { increment: 1 } } });
-  else await db.sop.create({ data });
+  if (id) {
+    const cur = must(await sb.from("Sop").select("version").eq("id", id).single(), "SOP") as { version: number };
+    // A new version asks everyone to read it again.
+    must(await sb.from("Sop").update({ ...data, version: cur.version + 1, updatedAt: new Date().toISOString() }).eq("id", id), "save SOP");
+  } else must(await sb.from("Sop").insert(data), "add SOP");
   done(data.locationId ? `/locations/${data.locationId}` : "/sops");
 }
 
+// ---------- Floor plans ----------
 export async function createLayout(form: FormData) {
   await requireUser("MANAGER");
   const locationId = String(form.get("locationId"));
-  const l = await db.layout.create({ data: { locationId, name: s(form, "name") ?? "Floor plan" } });
+  const sb = admin();
+  const count = (await sb.from("Layout").select("id", { count: "exact", head: true }).eq("locationId", locationId)).count ?? 0;
+  const l = must(await sb.from("Layout").insert({ locationId, name: s(form, "name") ?? "Floor plan", sortOrder: count }).select("id").single(), "add floor plan") as { id: string };
   done(`/locations/${locationId}/layouts/${l.id}`);
 }
 
-type RoomInput = { id?: string; name: string; type: string; points: number[][]; color: string; customTasks: string[]; notes?: string | null };
+export type RoomInput = { id?: string; name: string; type: string; points: number[][]; color: string; customTasks: TaskDef[]; notes?: string | null };
+export type LayoutInput = { name: string; aspect: number; image: { keep: true } | { remove: true } | { dataUrl: string }; rooms: RoomInput[] };
 
-/** Saves the whole traced layout from the editor in one go. */
-export async function saveLayout(layoutId: string, payload: { name: string; imageData: string | null; aspect: number; rooms: RoomInput[] }) {
+/** Saves the whole floor plan from the editor: image, rooms in cleaning order, their tasks. */
+export async function saveLayout(layoutId: string, payload: LayoutInput) {
   await requireUser("MANAGER");
-  const existing = await db.room.findMany({ where: { layoutId }, select: { id: true } });
-  const keep = new Set(payload.rooms.map((r) => r.id).filter(Boolean));
-  await db.$transaction([
-    db.layout.update({ where: { id: layoutId }, data: { name: payload.name, imageData: payload.imageData, aspect: payload.aspect } }),
-    // Rooms removed in the editor: their history (timers/checks) goes with them by design.
-    db.room.deleteMany({ where: { layoutId, id: { in: existing.map((e) => e.id).filter((id) => !keep.has(id)) } } }),
-    ...payload.rooms.map((r) => {
-      const data = { name: r.name || "Room", type: r.type, points: r.points, color: r.color, customTasks: r.customTasks, notes: r.notes ?? null };
-      return r.id ? db.room.update({ where: { id: r.id }, data }) : db.room.create({ data: { ...data, layoutId } });
-    }),
-  ]);
+  const sb = admin();
+  const cur = must(await sb.from("Layout").select("locationId, imagePath").eq("id", layoutId).single(), "floor plan") as { locationId: string; imagePath: string | null };
+  let imagePath = cur.imagePath;
+  if ("remove" in payload.image) imagePath = null;
+  if ("dataUrl" in payload.image) imagePath = await uploadDataUrl(payload.image.dataUrl, `layouts/${layoutId}`);
+  if (imagePath !== cur.imagePath) await removeImages([cur.imagePath]);
+  must(await sb.from("Layout").update({ name: payload.name, aspect: payload.aspect, imagePath, updatedAt: new Date().toISOString() }).eq("id", layoutId), "save floor plan");
+
+  // Rooms removed in the editor: their history (timers/checks/photos) goes with them by design.
+  const keep = payload.rooms.map((r) => r.id).filter(Boolean) as string[];
+  const del = sb.from("Room").delete().eq("layoutId", layoutId);
+  must(keep.length ? await del.not("id", "in", `(${keep.map((k) => `"${k}"`).join(",")})`) : await del, "remove rooms");
+  const clean = (r: RoomInput, i: number) => ({
+    layoutId, name: r.name.trim() || "Room", type: r.type.trim() || "Other", points: r.points, color: r.color, notes: r.notes ?? null, sortOrder: i,
+    customTasks: r.customTasks.filter((t) => t.label.trim()).map((t) => ({ label: t.label.trim(), serviceTypeIds: t.serviceTypeIds ?? [], minutes: t.minutes ?? null })),
+  });
+  const existing = payload.rooms.map((r, i) => ({ r, i })).filter(({ r }) => r.id);
+  const fresh = payload.rooms.map((r, i) => ({ r, i })).filter(({ r }) => !r.id);
+  if (existing.length) must(await sb.from("Room").upsert(existing.map(({ r, i }) => ({ id: r.id, ...clean(r, i) }))), "save rooms");
+  if (fresh.length) must(await sb.from("Room").insert(fresh.map(({ r, i }) => clean(r, i))), "add rooms");
   revalidatePath("/", "layout");
   return { ok: true };
 }
 
 export async function deleteLayout(layoutId: string) {
   await requireUser("MANAGER");
-  const l = await db.layout.delete({ where: { id: layoutId } });
+  const sb = admin();
+  const l = must(await sb.from("Layout").select("locationId, imagePath").eq("id", layoutId).single(), "floor plan") as { locationId: string; imagePath: string | null };
+  must(await sb.from("Layout").delete().eq("id", layoutId), "delete floor plan");
+  await removeImages([l.imagePath]);
   done(`/locations/${l.locationId}`);
 }
 
@@ -107,27 +129,35 @@ export async function deleteLayout(layoutId: string) {
 export async function addRoomTypeTask(form: FormData) {
   await requireUser("MANAGER");
   const roomType = String(form.get("roomType")).trim();
-  for (const label of lines(s(form, "labels"))) await db.roomTypeTask.create({ data: { roomType, label } });
+  const serviceTypeIds = form.getAll("serviceTypeIds").map(String).filter(Boolean);
+  const minutes = n(form, "minutes");
+  const sb = admin();
+  const count = (await sb.from("RoomTypeTask").select("id", { count: "exact", head: true }).eq("roomType", roomType)).count ?? 0;
+  const rows = lines(s(form, "labels")).map((label, i) => ({ roomType, label, serviceTypeIds, minutes, sortOrder: count + i }));
+  if (rows.length) must(await sb.from("RoomTypeTask").insert(rows), "add tasks");
   done("/settings");
+}
+export async function updateRoomTypeTask(form: FormData) {
+  await requireUser("MANAGER");
+  must(await admin().from("RoomTypeTask").update({
+    label: String(form.get("label")).trim(), minutes: n(form, "minutes"), serviceTypeIds: form.getAll("serviceTypeIds").map(String).filter(Boolean),
+  }).eq("id", String(form.get("id"))), "save task");
+  revalidatePath("/settings");
 }
 export async function deleteRoomTypeTask(id: string) {
   await requireUser("MANAGER");
-  await db.roomTypeTask.delete({ where: { id } });
+  must(await admin().from("RoomTypeTask").delete().eq("id", id), "remove task");
   revalidatePath("/settings");
 }
 
 // ---------- Inventory ----------
 export async function adjustStock(form: FormData) {
   const me = await requireUser("MANAGER");
-  const supplyId = String(form.get("supplyId"));
-  const depotId = String(form.get("depotId"));
   const delta = Math.trunc(Number(form.get("delta") || 0));
-  const reason = String(form.get("reason") || "RESTOCK");
   if (!delta) return;
-  await db.$transaction([
-    db.stockLevel.upsert({ where: { supplyId_depotId: { supplyId, depotId } }, create: { supplyId, depotId, quantity: delta }, update: { quantity: { increment: delta } } }),
-    db.stockMovement.create({ data: { supplyId, depotId, userId: me.id, delta, reason } }),
-  ]);
+  must(await admin().rpc("adjust_stock", {
+    p_supply: String(form.get("supplyId")), p_depot: String(form.get("depotId")), p_delta: delta, p_reason: String(form.get("reason") || "RESTOCK"), p_user: me.id,
+  }), "adjust stock");
   revalidatePath("/inventory");
 }
 
@@ -135,95 +165,188 @@ export async function saveSupply(form: FormData) {
   await requireUser("MANAGER");
   const id = s(form, "id");
   const data = { name: String(form.get("name")), sku: s(form, "sku"), unit: s(form, "unit") ?? "each", unitCost: n(form, "unitCost") ?? 0, reorderAt: n(form, "reorderAt") ?? 5 };
-  if (id) await db.supply.update({ where: { id }, data });
-  else await db.supply.create({ data });
+  must(id ? await admin().from("Supply").update(data).eq("id", id) : await admin().from("Supply").insert(data), "save supply");
   done("/inventory");
 }
 
 export async function saveDepot(form: FormData) {
   await requireUser("MANAGER");
-  await db.supplyDepot.create({
-    data: { name: String(form.get("name")), address: String(form.get("address")), latitude: n(form, "latitude"), longitude: n(form, "longitude"), geofenceM: n(form, "geofenceM") ?? 150 },
-  });
+  must(await admin().from("SupplyDepot").insert({
+    name: String(form.get("name")), address: String(form.get("address")), latitude: n(form, "latitude"), longitude: n(form, "longitude"), geofenceM: n(form, "geofenceM") ?? 150,
+  }), "add pickup location");
   done("/inventory");
 }
 
 // ---------- Time ----------
 export async function approveTime(ids: string[]) {
   await requireUser("MANAGER");
-  await db.timeEntry.updateMany({ where: { id: { in: ids } }, data: { approved: true } });
+  must(await admin().from("TimeEntry").update({ approved: true }).in("id", ids), "approve");
   revalidatePath("/time");
 }
 
 export async function editTime(form: FormData) {
   await requireUser("MANAGER");
-  const id = String(form.get("id"));
-  const clockIn = fromLocalInput(String(form.get("clockIn")));
   const out = s(form, "clockOut");
   // Edited entries need re-approval.
-  await db.timeEntry.update({ where: { id }, data: { clockIn, clockOut: out ? fromLocalInput(out) : null, note: s(form, "note"), approved: false } });
+  must(await admin().from("TimeEntry").update({
+    clockIn: fromLocalInput(String(form.get("clockIn"))).toISOString(), clockOut: out ? fromLocalInput(out).toISOString() : null, note: s(form, "note"), approved: false,
+  }).eq("id", String(form.get("id"))), "save time");
   revalidatePath("/time");
 }
 
 // ---------- Issues / announcements ----------
 export async function resolveIssue(id: string) {
   await requireUser("MANAGER");
-  await db.issue.update({ where: { id }, data: { status: "RESOLVED", resolvedAt: new Date() } });
+  must(await admin().from("Issue").update({ status: "RESOLVED", resolvedAt: new Date().toISOString() }).eq("id", id), "resolve");
   revalidatePath("/", "layout");
 }
 
 export async function postAnnouncement(form: FormData) {
   await requireUser("MANAGER");
-  await db.announcement.create({ data: { title: String(form.get("title")), body: String(form.get("body") ?? "") } });
+  must(await admin().from("Announcement").insert({ title: String(form.get("title")), body: String(form.get("body") ?? "") }), "post");
   done("/dashboard");
 }
 
 // ---------- Clients ----------
 export async function saveClient(form: FormData) {
   await requireUser("MANAGER");
+  const sb = admin();
   const id = s(form, "id");
   const data = { name: String(form.get("name")), contactName: s(form, "contactName"), email: s(form, "email"), phone: s(form, "phone"), billingAddress: s(form, "billingAddress"), waveCustomerId: s(form, "waveCustomerId"), notes: s(form, "notes") };
-  const client = id ? await db.client.update({ where: { id }, data }) : await db.client.create({ data });
+  const client = must(id ? await sb.from("Client").update(data).eq("id", id).select("id").single() : await sb.from("Client").insert(data).select("id").single(), "save client") as { id: string };
   // Per-visit price for each service type: rate_<serviceTypeId>. Blank = not offered / not priced yet.
+  const set: { clientId: string; serviceTypeId: string; price: number }[] = [];
+  const unset: string[] = [];
   for (const [k, v] of form.entries()) {
     if (!k.startsWith("rate_")) continue;
-    const serviceTypeId = k.slice(5);
-    const where = { clientId_serviceTypeId: { clientId: client.id, serviceTypeId } };
     const val = String(v).trim();
-    if (val === "") await db.clientRate.deleteMany({ where: { clientId: client.id, serviceTypeId } });
-    else await db.clientRate.upsert({ where, create: { clientId: client.id, serviceTypeId, price: Number(val) }, update: { price: Number(val) } });
+    if (val === "") unset.push(k.slice(5)); else set.push({ clientId: client.id, serviceTypeId: k.slice(5), price: Number(val) });
   }
+  if (set.length) must(await sb.from("ClientRate").upsert(set, { onConflict: "clientId,serviceTypeId" }), "save prices");
+  if (unset.length) must(await sb.from("ClientRate").delete().eq("clientId", client.id).in("serviceTypeId", unset), "clear prices");
   done("/clients");
 }
 
 // ---------- Service types ----------
 export async function saveServiceType(form: FormData) {
   await requireUser("MANAGER");
+  const sb = admin();
   const id = s(form, "id");
   const name = String(form.get("name")).trim();
-  if (id) await db.serviceType.update({ where: { id }, data: { name, active: form.get("active") !== "off" } });
-  else await db.serviceType.create({ data: { name, sortOrder: (await db.serviceType.count()) } });
+  if (id) must(await sb.from("ServiceType").update({ name, active: form.get("active") !== "off" }).eq("id", id), "save service");
+  else {
+    const count = (await sb.from("ServiceType").select("id", { count: "exact", head: true })).count ?? 0;
+    must(await sb.from("ServiceType").insert({ name, sortOrder: count }), "add service");
+  }
   done("/settings");
 }
 
-// ---------- Team (owner manages roles/pay; managers can add staff) ----------
-export async function saveUser(form: FormData) {
+// ---------- Team: Supabase Auth logins + staff profiles ----------
+type TeamResult = { error?: string; ok?: string; tempPassword?: string };
+
+async function loadTarget(id: string) {
+  return must(await admin().from("User").select("*").eq("id", id).single(), "team member") as Profile;
+}
+async function ownerCount() {
+  return (await admin().from("User").select("id", { count: "exact", head: true }).eq("role", "OWNER").eq("active", true)).count ?? 0;
+}
+/** Has this person any work history (which must be kept for payroll and records)? */
+async function hasHistory(id: string) {
+  const sb = admin();
+  const counts = await Promise.all([
+    sb.from("TimeEntry").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("Checkin").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("Assignment").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("Issue").select("id", { count: "exact", head: true }).eq("reportedById", id),
+    sb.from("RoomSession").select("id", { count: "exact", head: true }).eq("userId", id),
+    sb.from("RoomPhoto").select("id", { count: "exact", head: true }).eq("userId", id),
+  ]);
+  return counts.some((c) => (c.count ?? 0) > 0);
+}
+
+/** Add an employee (creates their Supabase login, email already confirmed) or update one. */
+export async function saveUser(_: unknown, form: FormData): Promise<TeamResult> {
   const me = await requireUser("MANAGER");
+  const sb = admin();
   const id = s(form, "id");
-  let role = (s(form, "role") ?? "STAFF") as Role;
-  if (me.role !== "OWNER") role = "STAFF";
-  const base = {
-    name: String(form.get("name")), email: String(form.get("email")).toLowerCase(), phone: s(form, "phone"),
-    role, waveEmployeeId: s(form, "waveEmployeeId"), active: form.get("active") !== "off",
-    ...(me.role === "OWNER" ? { hourlyRate: n(form, "hourlyRate") ?? 0 } : {}),
-  };
+  const role = (s(form, "role") ?? "STAFF") as Role;
+  if (!assignableRoles(me).includes(role)) return { error: "You can't give that access level. Ask the owner." };
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  const name = String(form.get("name") ?? "").trim();
+  if (!name || !email) return { error: "Enter a name and an email." };
+  const profile: Record<string, unknown> = { name, email, phone: s(form, "phone"), role, waveEmployeeId: s(form, "waveEmployeeId") };
+  if (me.role === "OWNER" && form.has("hourlyRate")) profile.hourlyRate = n(form, "hourlyRate") ?? 0;
   const pw = s(form, "password");
+  if (pw && pw.length < 8) return { error: "Passwords need at least 8 characters." };
+
   if (id) {
-    if (me.role !== "OWNER") throw new Error("Only the owner can edit team members");
-    await db.user.update({ where: { id }, data: { ...base, ...(pw ? { passwordHash: await bcrypt.hash(pw, 10) } : {}) } });
-  } else {
-    if (!pw) throw new Error("A starting password is required");
-    await db.user.create({ data: { ...base, passwordHash: await bcrypt.hash(pw, 10) } });
+    const target = await loadTarget(id);
+    if (!canManage(me, target) && target.id !== me.id) return { error: "You can't edit this person. Ask the owner." };
+    if (target.id === me.id && role !== me.role) return { error: "You can't change your own access level." };
+    if (target.role === "OWNER" && role !== "OWNER" && (await ownerCount()) <= 1) return { error: "This is the only owner. Make someone else an owner first." };
+    const { error } = await sb.auth.admin.updateUserById(id, { email, email_confirm: true, ...(pw ? { password: pw } : {}) });
+    if (error) return { error: `Couldn't update the login: ${error.message}` };
+    const up = await sb.from("User").update(profile).eq("id", id);
+    if (up.error) return { error: `Couldn't save: ${up.error.message}` };
+    revalidatePath("/team", "layout");
+    return { ok: "Saved." };
   }
-  done("/team");
+
+  if (!pw) return { error: "Set a starting password (8+ characters) and give it to them." };
+  const { data, error } = await sb.auth.admin.createUser({ email, password: pw, email_confirm: true, user_metadata: { name } });
+  if (error || !data.user) return { error: error?.message?.includes("already") ? "Someone already uses that email." : `Couldn't create the login: ${error?.message ?? "unknown error"}` };
+  const ins = await sb.from("User").insert({ id: data.user.id, hourlyRate: 0, ...profile });
+  if (ins.error) {
+    await sb.auth.admin.deleteUser(data.user.id); // don't leave a login without a profile
+    return { error: `Couldn't save the team member: ${ins.error.message}` };
+  }
+  revalidatePath("/team", "layout");
+  redirect(`/team/${data.user.id}?added=1`);
+}
+
+/** Turn a login off (blocked at Supabase Auth, history kept) or back on. */
+export async function setUserActive(id: string, active: boolean): Promise<TeamResult> {
+  const me = await requireUser("MANAGER");
+  const target = await loadTarget(id);
+  if (target.id === me.id) return { error: "You can't turn off your own login." };
+  if (!canManage(me, target)) return { error: "You can't change this person. Ask the owner." };
+  if (!active && target.role === "OWNER" && (await ownerCount()) <= 1) return { error: "This is the only owner and can't be turned off." };
+  const { error } = await admin().auth.admin.updateUserById(id, { ban_duration: active ? "none" : "876000h" });
+  if (error) return { error: `Couldn't update the login: ${error.message}` };
+  must(await admin().from("User").update({ active }).eq("id", id), "save status");
+  revalidatePath("/team", "layout");
+  return { ok: active ? "Login turned back on." : "Login turned off. Their history is kept." };
+}
+
+/** Set a temporary password for someone who's locked out. Returned once to show the manager. */
+export async function resetPassword(id: string): Promise<TeamResult> {
+  const me = await requireUser("MANAGER");
+  const target = await loadTarget(id);
+  if (!canManage(me, target)) return { error: "You can't reset this person's password. Ask the owner." };
+  const words = ["Mop", "Shine", "Fresh", "Sparkle", "Clean", "Polish", "Bright", "Tidy"];
+  const temp = `${words[Math.floor(Math.random() * words.length)]}-${crypto.randomUUID().slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const { error } = await admin().auth.admin.updateUserById(id, { password: temp });
+  if (error) return { error: `Couldn't reset the password: ${error.message}` };
+  return { ok: "Temporary password set. Give it to them; they can sign in with it right away.", tempPassword: temp };
+}
+
+/** Remove someone. With work history they're turned off instead (records are kept for payroll). */
+export async function removeUser(id: string): Promise<TeamResult> {
+  const me = await requireUser("MANAGER");
+  const target = await loadTarget(id);
+  if (target.id === me.id) return { error: "You can't remove yourself." };
+  if (!canManage(me, target)) return { error: "You can't remove this person. Ask the owner." };
+  if (target.role === "OWNER" && (await ownerCount()) <= 1) return { error: "This is the only owner and can't be removed." };
+  if (await hasHistory(id)) {
+    const r = await setUserActive(id, false);
+    return r.error ? r : { ok: "They have work history, so their login was turned off instead of deleted. Hours and jobs stay for payroll." };
+  }
+  const sb = admin();
+  await sb.from("SopAck").delete().eq("userId", id);
+  await sb.from("Assignment").update({ createdById: null }).eq("createdById", id);
+  must(await sb.from("User").delete().eq("id", id), "remove profile");
+  const { error } = await sb.auth.admin.deleteUser(id);
+  if (error) return { error: `Profile removed, but the login couldn't be deleted: ${error.message}` };
+  revalidatePath("/team", "layout");
+  redirect("/team?removed=1");
 }

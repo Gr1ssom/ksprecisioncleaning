@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Assignment, Location, Profile, ServiceType } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Empty, PageHeader } from "@/components/ui";
 import { createInvoice } from "@/app/actions/billing";
@@ -11,11 +12,13 @@ export const dynamic = "force-dynamic";
 export default async function NewInvoice({ searchParams }: { searchParams: Promise<{ clientId?: string }> }) {
   await requireUser("MANAGER");
   const sp = await searchParams;
-  const clients = await db.client.findMany({ orderBy: { name: "asc" } });
+  const sb = admin();
+  const clients = must(await sb.from("Client").select("id, name").order("name"), "clients") as { id: string; name: string }[];
   const clientId = sp.clientId ?? clients[0]?.id;
-  const visits = clientId
-    ? await db.assignment.findMany({ where: { status: "COMPLETED", invoiceId: null, location: { clientId } }, include: { location: true, user: true, serviceType: true }, orderBy: { date: "asc" } })
-    : [];
+  const visits = (clientId
+    ? must(await sb.from("Assignment").select("*, location:Location!inner(*), user:User!Assignment_userId_fkey(name), serviceType:ServiceType(*)")
+        .eq("status", "COMPLETED").is("invoiceId", null).eq("location.clientId", clientId).order("date"), "visits")
+    : []) as (Assignment & { location: Location; user: Pick<Profile, "name"> | null; serviceType: ServiceType | null })[];
   const rate = await rateBook();
   const unpriced = visits.filter((v) => rate(clientId, v.serviceTypeId) == null);
   return (

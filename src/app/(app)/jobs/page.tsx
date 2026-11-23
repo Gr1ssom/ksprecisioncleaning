@@ -1,8 +1,10 @@
+import { Plus } from "lucide-react";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Assignment, Location, Profile, ServiceType } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Badge, Empty, PageHeader } from "@/components/ui";
-import { isoDay, todayUTC, type Task } from "@/lib/format";
+import { isoDay, todayUTC } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -14,13 +16,15 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
   const monday = new Date(t.getTime() - ((t.getUTCDay() + 6) % 7) * 86400_000 + offset * 7 * 86400_000);
   const days = Array.from({ length: 7 }, (_, i) => new Date(monday.getTime() + i * 86400_000));
   const staffView = user.role === "STAFF";
-  const [jobs, staff] = await Promise.all([
-    db.assignment.findMany({
-      where: { date: { gte: days[0], lte: days[6] }, ...(staffView ? { OR: [{ userId: user.id }, { userId: null }] } : sp.who ? { userId: sp.who === "open" ? null : sp.who } : {}) },
-      include: { location: true, user: true, serviceType: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }],
-    }),
-    staffView ? [] : db.user.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
-  ]);
+  const sb = admin();
+  let jq = sb.from("Assignment").select("*, location:Location(name), user:User!Assignment_userId_fkey(name), serviceType:ServiceType(name)")
+    .gte("date", isoDay(days[0])).lte("date", isoDay(days[6])).order("date").order("startTime");
+  if (staffView) jq = jq.or(`userId.eq.${user.id},userId.is.null`);
+  else if (sp.who === "open") jq = jq.is("userId", null);
+  else if (sp.who) jq = jq.eq("userId", sp.who);
+  const [jr, ur] = await Promise.all([jq, staffView ? null : sb.from("User").select("id, name").eq("active", true).order("name")]);
+  const jobs = must(jr, "jobs") as (Assignment & { location: Pick<Location, "name">; user: Pick<Profile, "name"> | null; serviceType: Pick<ServiceType, "name"> | null })[];
+  const staff = ur ? (must(ur, "team") as Pick<Profile, "id" | "name">[]) : [];
   const q = (o: Record<string, string | number | undefined>) => "?" + new URLSearchParams(Object.entries({ week: offset, who: sp.who, ...o }).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)])).toString();
 
   return (
@@ -33,9 +37,9 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
         <Link href={q({ week: offset + 1 })} className="btn-secondary">Next →</Link>
         {!staffView && (
           <div className="flex flex-wrap gap-1 text-sm">
-            <Link href={q({ who: "" })} className={`badge ${!sp.who ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>Everyone</Link>
-            <Link href={q({ who: "open" })} className={`badge ${sp.who === "open" ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>Open shifts</Link>
-            {staff.map((s) => <Link key={s.id} href={q({ who: s.id })} className={`badge ${sp.who === s.id ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-700"}`}>{s.name.split(" ")[0]}</Link>)}
+            <Link href={q({ who: "" })} className={`chip ${!sp.who ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>Everyone</Link>
+            <Link href={q({ who: "open" })} className={`chip ${sp.who === "open" ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>Open shifts</Link>
+            {staff.map((s) => <Link key={s.id} href={q({ who: s.id })} className={`chip ${sp.who === s.id ? "bg-ink text-paper" : "bg-slate-100 text-slate-700"}`}>{s.name.split(" ")[0]}</Link>)}
           </div>
         )}
       </div>
@@ -47,11 +51,11 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
             <div key={d.toISOString()} className={`rounded-xl border p-2 ${isToday ? "border-brand-500 bg-brand-50" : "border-slate-200 bg-surface"}`}>
               <div className="mb-2 flex items-center justify-between text-xs font-semibold text-slate-600">
                 {d.toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric", timeZone: "UTC" })}
-                {!staffView && <Link href={`/jobs/new?date=${isoDay(d)}`} className="text-brand-600" title="Add job">＋</Link>}
+                {!staffView && <Link href={`/jobs/new?date=${isoDay(d)}`} className="-m-2 flex h-10 w-10 items-center justify-center text-brand-600" title="Add job" aria-label="Add job"><Plus className="h-3.5 w-3.5" /></Link>}
               </div>
               <div className="space-y-1.5">
                 {dayJobs.map((j) => {
-                  const tk = (j.tasks as Task[]) ?? [];
+                  const tk = j.tasks ?? [];
                   return (
                     <Link key={j.id} href={`/jobs/${j.id}`} className={`block rounded-lg border p-2 text-xs hover:border-brand-500 ${j.userId ? "border-slate-200 bg-surface" : "border-dashed border-amber-400 bg-surface"}`}>
                       <div className="font-semibold text-slate-900">{j.startTime} · {j.location.name}</div>

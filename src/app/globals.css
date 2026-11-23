@@ -1,58 +1,115 @@
 @import "tailwindcss";
 
+/*
+ * KS Precision Cleaning brand: black & white.
+ * - ink / paper: the brand pair. Primary buttons, active tabs and the logo are ink on paper,
+ *   and they swap in dark mode (white buttons with black text).
+ * - brand-*: kept as aliases of the ink scale so links and highlights follow the brand.
+ * - slate-*: remapped to neutral greys (no blue tint) and mirrored in dark mode, so every
+ *   text-slate / bg-slate / border-slate flips with the theme.
+ * Cards use bg-surface (never bg-white).
+ */
 @theme {
-  --color-brand-50: #eef7ff;
-  --color-brand-100: #d9edff;
-  --color-brand-500: #1d8fe1;
-  --color-brand-600: #0b72c2;
-  --color-brand-700: #0a5a99;
-  --color-brand-900: #0c2f4f;
+  --font-sans: Montserrat, ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+
+  --color-ink: #111111;
+  --color-paper: #ffffff;
   --color-surface: #ffffff;
+
+  --color-brand-50: #f3f3f3;
+  --color-brand-100: #e4e4e4;
+  --color-brand-500: #3a3a3a;
+  --color-brand-600: #111111;
+  --color-brand-700: #000000;
+  --color-brand-900: #000000;
+
+  --color-slate-50: #f7f7f7;
+  --color-slate-100: #efefef;
+  --color-slate-200: #e2e2e2;
+  --color-slate-300: #cfcfcf;
+  --color-slate-400: #9e9e9e;
+  --color-slate-500: #6b6b6b;
+  --color-slate-600: #4a4a4a;
+  --color-slate-700: #333333;
+  --color-slate-800: #1f1f1f;
+  --color-slate-900: #111111;
 }
 
-/*
- * Dark mode: the slate scale is mirrored, so every slate text/border/background flips with the
- * theme. Cards use bg-surface (never bg-white) so they darken with their text.
- * Tinted chips (bg-*-100 text-*-700) intentionally stay light in both themes.
- */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-surface: #111827;
-    --color-slate-50: #0b1220;
-    --color-slate-100: #1a2333;
-    --color-slate-200: #263247;
-    --color-slate-300: #374359;
-    --color-slate-400: #6b7a90;
-    --color-slate-500: #94a3b8;
-    --color-slate-600: #cbd5e1;
-    --color-slate-700: #e2e8f0;
-    --color-slate-800: #f1f5f9;
-    --color-slate-900: #f8fafc;
-    --color-brand-50: #0f2a44;
-    --color-brand-700: #9fd0ff;
+    --color-ink: #f5f5f5;
+    --color-paper: #0b0b0b;
+    --color-surface: #151515;
+
+    --color-brand-50: #1f1f1f;
+    --color-brand-100: #2b2b2b;
+    --color-brand-500: #d6d6d6;
+    --color-brand-600: #f5f5f5;
+    --color-brand-700: #ffffff;
+
+    --color-slate-50: #0b0b0b;
+    --color-slate-100: #1c1c1c;
+    --color-slate-200: #2a2a2a;
+    --color-slate-300: #3b3b3b;
+    --color-slate-400: #6f6f6f;
+    --color-slate-500: #a3a3a3;
+    --color-slate-600: #cfcfcf;
+    --color-slate-700: #e5e5e5;
+    --color-slate-800: #f2f2f2;
+    --color-slate-900: #fafafa;
     color-scheme: dark;
   }
 }
 
-body { @apply bg-slate-50 text-slate-900 antialiased; }
+body { @apply bg-slate-50 font-sans text-slate-900 antialiased; overscroll-behavior-y: none; }
 
+/* Phones: feel like a native app. */
+html { -webkit-text-size-adjust: 100%; }
+a, button, summary, label, input, select, textarea, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* no double-tap zoom delay */
+}
+summary { cursor: pointer; }
+/* Phones: every disclosure row is a full-height tap target. */
+@media (max-width: 767px) {
+  summary { min-height: 44px; display: flex; align-items: center; }
+}
+summary::-webkit-details-marker { display: none; }
+
+/* 44px minimum tap target on phones (Apple HIG / Material); compact from md up. */
 @utility btn {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:opacity-50 cursor-pointer;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition select-none active:scale-[0.98] disabled:opacity-50 cursor-pointer md:min-h-9 md:px-3.5;
+}
+
+/* Safe areas: keep content clear of the iPhone notch and home bar in full-screen mode. */
+@utility pt-safe { padding-top: env(safe-area-inset-top); }
+@utility pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+
+/* Wide-tracked caps, like RESIDENTIAL | COMMERCIAL in the logo. */
+@utility eyebrow {
+  @apply text-[11px] font-medium uppercase tracking-[0.2em] text-slate-500;
 }
 
 @layer components {
-  .card { @apply rounded-xl border border-slate-200 bg-surface p-4 shadow-sm; }
-  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-700; }
-  .btn-secondary { @apply btn border border-slate-300 bg-surface text-slate-700 hover:bg-slate-50; }
+  .card { @apply rounded-lg border border-slate-200 bg-surface p-4 shadow-sm; }
+  .btn-primary { @apply btn bg-ink text-paper hover:opacity-85; }
+  .btn-secondary { @apply btn border border-slate-300 bg-surface text-slate-800 hover:border-ink; }
   .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
   .btn-success { @apply btn bg-emerald-600 text-white hover:bg-emerald-700; }
-  .input { @apply w-full rounded-lg border border-slate-300 bg-surface px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100; }
-  .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500; }
-  .h1 { @apply text-2xl font-bold tracking-tight text-slate-900; }
-  .h2 { @apply text-lg font-semibold text-slate-900; }
+  /* 16px text on phones stops iOS Safari zooming into a field when it's tapped. */
+  .input { @apply min-h-11 w-full rounded-md border border-slate-300 bg-surface px-3 py-2 text-base text-slate-900 focus:border-ink focus:outline-none focus:ring-2 focus:ring-slate-200 md:min-h-9 md:text-sm; }
+  input[type="checkbox"], input[type="radio"] { @apply h-5 w-5 shrink-0 accent-[var(--color-ink)]; }
+  .label { @apply eyebrow mb-1 block; }
+  .h1 { @apply font-serif text-3xl font-black tracking-tight text-slate-900; }
+  .h2 { @apply text-base font-bold uppercase tracking-[0.08em] text-slate-900; }
   .muted { @apply text-sm text-slate-500; }
-  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+  /* Tappable filter pill (badge is display-only). */
+  .chip { @apply inline-flex min-h-10 items-center rounded-full px-4 text-sm font-semibold md:min-h-8 md:px-3; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold; }
   .tbl { @apply w-full text-left text-sm; }
-  .tbl th { @apply border-b border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500; }
+  .tbl th { @apply eyebrow border-b border-slate-200 px-3 py-2; }
   .tbl td { @apply border-b border-slate-100 px-3 py-2 align-top; }
+  /* Brand rule: a thin line, as on either side of KS in the logo. */
+  .rule { @apply h-px flex-1 bg-slate-300; }
 }

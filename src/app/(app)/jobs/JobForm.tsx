@@ -1,10 +1,10 @@
 import { saveAssignment } from "@/app/actions/manage";
-import { isoDay, todayUTC, type Task } from "@/lib/format";
+import { today } from "@/lib/format";
 
 type Opt = { id: string; name: string };
 export function JobForm({ locations, staff, serviceTypes, job, defaults }: {
   locations: Opt[]; staff: Opt[]; serviceTypes: Opt[];
-  job?: { id: string; locationId: string; serviceTypeId: string | null; userId: string | null; date: Date; startTime: string; endTime: string | null; notes: string | null; tasks: unknown };
+  job?: { id: string; locationId: string; serviceTypeId: string | null; userId: string | null; date: string; startTime: string; endTime: string | null; notes: string | null; tasks: { label: string; done: boolean }[] };
   defaults?: { locationId?: string; date?: string };
 }) {
   return (
@@ -32,7 +32,7 @@ export function JobForm({ locations, staff, serviceTypes, job, defaults }: {
         </div>
         <div>
           <label className="label">Date</label>
-          <input type="date" name="date" className="input" defaultValue={job ? isoDay(job.date) : defaults?.date ?? isoDay(todayUTC())} required />
+          <input type="date" name="date" className="input" defaultValue={job?.date ?? defaults?.date ?? today()} required />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div><label className="label">Start</label><input type="time" name="startTime" className="input" defaultValue={job?.startTime ?? "18:00"} required /></div>
@@ -42,7 +42,7 @@ export function JobForm({ locations, staff, serviceTypes, job, defaults }: {
       <div>
         <label className="label">Job checklist (one per line)</label>
         <textarea name="tasks" rows={4} className="input" placeholder={"Room tasks come from the floor plan.\nAdd anything extra for this visit here."}
-          defaultValue={((job?.tasks as Task[]) ?? []).map((t) => t.label).join("\n")} />
+          defaultValue={(job?.tasks ?? []).map((t) => t.label).join("\n")} />
       </div>
       <div>
         <label className="label">Notes</label>

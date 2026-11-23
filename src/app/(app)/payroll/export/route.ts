@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { payrollFor } from "@/lib/payroll";
 
 const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -9,8 +9,8 @@ const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s)
  * hours sheet (regular/overtime) to enter on Wave's "Run payroll" screen, plus a gross check column.
  */
 export async function GET(req: Request) {
-  const s = await getSession();
-  if (!s || s.role !== "OWNER") return new NextResponse("Forbidden", { status: 403 });
+  const me = await currentUser();
+  if (!me || !me.active || me.role !== "OWNER") return new NextResponse("Only the owner can export payroll.", { status: 403 });
   const url = new URL(req.url);
   const from = new Date(url.searchParams.get("from") + "T00:00:00Z");
   const to = new Date(new Date(url.searchParams.get("to") + "T00:00:00Z").getTime() + 86400_000);

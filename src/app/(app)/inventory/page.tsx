@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Profile, StockLevel, StockMovement, Supply, SupplyDepot } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { PageHeader, Stat } from "@/components/ui";
 import { adjustStock, saveDepot, saveSupply } from "@/app/actions/manage";
@@ -8,16 +9,22 @@ export const dynamic = "force-dynamic";
 
 export default async function Inventory() {
   await requireUser("MANAGER");
-  const [supplies, depots, moves, usage] = await Promise.all([
-    db.supply.findMany({ include: { stock: true }, orderBy: { name: "asc" } }),
-    db.supplyDepot.findMany({ orderBy: { name: "asc" } }),
-    db.stockMovement.findMany({ include: { supply: true, depot: true, user: true }, orderBy: { at: "desc" }, take: 20 }),
-    db.stockMovement.groupBy({ by: ["supplyId"], where: { reason: "PICKUP", at: { gte: new Date(Date.now() - 30 * 86400_000) } }, _sum: { delta: true } }),
+  const sb = admin();
+  const [sr, dr, mr, ur] = await Promise.all([
+    sb.from("Supply").select("*, stock:StockLevel(*)").order("name"),
+    sb.from("SupplyDepot").select("*").order("name"),
+    sb.from("StockMovement").select("*, supply:Supply(name), depot:SupplyDepot(name), user:User(name)").order("at", { ascending: false }).limit(20),
+    sb.from("StockMovement").select("supplyId, delta").eq("reason", "PICKUP").gte("at", new Date(Date.now() - 30 * 86400_000).toISOString()),
   ]);
+  const supplies = must(sr, "supplies") as (Supply & { stock: StockLevel[] })[];
+  const depots = must(dr, "pickup locations") as SupplyDepot[];
+  const moves = must(mr, "movements") as (StockMovement & { supply: Pick<Supply, "name">; depot: Pick<SupplyDepot, "name">; user: Pick<Profile, "name"> | null })[];
+  const usedBy = new Map<string, number>();
+  for (const m of must(ur, "usage") as Pick<StockMovement, "supplyId" | "delta">[]) usedBy.set(m.supplyId, (usedBy.get(m.supplyId) ?? 0) - m.delta);
   const qty = (s: (typeof supplies)[number], d: string) => s.stock.find((x) => x.depotId === d)?.quantity ?? 0;
   const value = supplies.reduce((sum, s) => sum + s.stock.reduce((a, x) => a + x.quantity, 0) * Number(s.unitCost), 0);
   const lowCount = supplies.reduce((n, s) => n + depots.filter((d) => qty(s, d.id) <= s.reorderAt).length, 0);
-  const used = (id: string) => -(usage.find((u) => u.supplyId === id)?._sum.delta ?? 0);
+  const used = (id: string) => usedBy.get(id) ?? 0;
   const spend30 = supplies.reduce((sum, s) => sum + used(s.id) * Number(s.unitCost), 0);
 
   return (
@@ -71,7 +78,7 @@ export default async function Inventory() {
         </section>
         <section className="space-y-3">
           <details className="card">
-            <summary className="cursor-pointer font-semibold text-brand-600">＋ New supply item</summary>
+            <summary className="cursor-pointer font-semibold text-brand-600">New supply item</summary>
             <form action={saveSupply} className="mt-3 grid grid-cols-2 gap-2">
               <input name="name" placeholder="Name" className="input col-span-2" required />
               <input name="sku" placeholder="SKU" className="input" />
@@ -82,7 +89,7 @@ export default async function Inventory() {
             </form>
           </details>
           <details className="card">
-            <summary className="cursor-pointer font-semibold text-brand-600">＋ New pickup location</summary>
+            <summary className="cursor-pointer font-semibold text-brand-600">New pickup location</summary>
             <form action={saveDepot} className="mt-3 grid grid-cols-2 gap-2">
               <input name="name" placeholder="Name" className="input col-span-2" required />
               <input name="address" placeholder="Address" className="input col-span-2" required />

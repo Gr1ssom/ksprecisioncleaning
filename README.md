@@ -10,50 +10,55 @@ staff, manager and owner views.
 | --- | --- | --- | --- |
 | **Check-in**: GPS-verified at supply pickup and on site, with geofence flags | ✓ | ✓ | ✓ |
 | **Jobs**: today's jobs, job checklist, check in/out, open shifts | own | schedule, assign, repeat weekly | ✓ |
-| **Room map**: tap a room for its tasks, start/stop room timers | ✓ | ✓ | ✓ |
-| **Floor plans**: upload a plan, trace rooms, set room type and custom tasks | view | edit | edit |
+| **Room map**: numbered route, tap a room for its tasks, room timers vs usual time, finish room, before/after photos | ✓ | ✓ | ✓ |
+| **Floor plans**: upload a plan, draw rooms with snapping, set the cleaning route, room types and per-room tasks (by service, with time estimates) | view | edit | edit |
 | **SOPs**: company and per-location, versioned, "I've read this" tracking | read | edit, see who read | ✓ |
 | **Issues**: report with photo, resolve | report | resolve | ✓ |
 | **Hours**: time from check-in/out | own | approve, edit | ✓ |
 | **Inventory**: stock per pickup location, auto-deducted on pickup, low-stock alerts | — | ✓ | ✓ |
-| **Reports**: time by room (client-ready), margin per location and per service, on-time rate | — | ✓ | ✓ |
+| **Reports**: floor-plan heat map and time by room (client-ready), margin per location and per service, on-time rate | — | ✓ | ✓ |
 | **Clients and pricing**: each client's per-visit price for Standard, Deep and Maintenance clean (and any service you add) | — | ✓ | ✓ |
 | **Invoices**: bill completed visits at the client's price for that service, send through Wave | — | ✓ | ✓ |
 | **Payroll**: regular/overtime hours CSV for Wave Payroll | — | — | ✓ |
 | **Team**: logins, roles, pay rates | — | add staff | ✓ |
 
+## How it's built
+
+Next.js 15 on Vercel, with **Supabase** for everything else: Auth (logins), Postgres (data, locked
+down with RLS so only the app server can read it) and Storage (floor plans and photos).
+Migrations in `supabase/migrations/` are applied by the Supabase GitHub integration when a PR
+merges to `main`.
+
+## Setup
+
+1. **Vercel environment variables** (Production and Preview):
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (already set)
+   - `SUPABASE_SECRET_KEY`: Supabase → Project Settings → API Keys → Secret keys. Mark it
+     Sensitive. Server only.
+   - `WAVE_ACCESS_TOKEN`, `WAVE_BUSINESS_ID`, and `WAVE_PRODUCT_ID` or `WAVE_INCOME_ACCOUNT_ID`
+     when you're ready to send invoices through Wave.
+2. **First owner:** open `https://<your app>/setup` and create the owner login. It works only while
+   the app has no users. Then add managers and staff on the Team page.
+3. **Set up:** clients and their prices per service, locations (with coordinates for the geofence),
+   floor plans, pickup locations, supplies and your team.
+
+**Install on phones:** open the app in Safari (iPhone) and choose *Share → Add to Home Screen*, or in
+Chrome (Android) choose *Install app*. It opens full screen like a native app.
+
 ## Local development
 
-Needs Node 20+ and Postgres.
-
 ```bash
-cp .env.example .env        # set DATABASE_URL and AUTH_SECRET
+cp .env.example .env.local   # fill in the Supabase keys
 npm install
-npm run db:migrate
-npm run db:seed             # demo data; password for all: password123
 npm run dev
 ```
 
-Demo logins: `owner@ks.test`, `manager@ks.test`, `staff@ks.test`, `devon@ks.test`.
+Demo data (only in a project with no real users yet):
 
-## Production (Supabase project "KSPC" + Vercel)
-
-The schema is already applied to the KSPC Supabase project.
-
-1. In Supabase, open **Project Settings → Database → Connection string** and copy the pooled URI
-   (port 6543). Add `?pgbouncer=true&connection_limit=1` for serverless.
-2. In Vercel, import this repo and set the environment variables:
-   - `DATABASE_URL`: the pooled connection string
-   - `AUTH_SECRET`: output of `openssl rand -base64 32`
-   - `WAVE_ACCESS_TOKEN`, `WAVE_BUSINESS_ID`, and `WAVE_PRODUCT_ID` or `WAVE_INCOME_ACCOUNT_ID` (optional, for Wave)
-3. Create the first owner login (from your machine, with `DATABASE_URL` pointing at Supabase):
-
-   ```bash
-   npm run create-owner -- "Your Name" you@example.com 'a-strong-password'
-   ```
-
-4. Sign in, then add clients, locations (with coordinates for the geofence), pickup locations,
-   supplies and your team.
+```bash
+ALLOW_DEMO_SEED=1 npm run demo:seed            # logins: owner@ks.test etc., password123
+ALLOW_DEMO_SEED=1 npm run demo:seed -- --clear # remove it again
+```
 
 ## Wave
 

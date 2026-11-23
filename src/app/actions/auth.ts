@@ -1,25 +1,24 @@
 "use server";
-import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { db } from "@/lib/db";
-import { SESSION_COOKIE, signSession } from "@/lib/session";
+import { admin, authClient } from "@/lib/supabase/server";
 
 export async function login(_: unknown, form: FormData) {
   const email = String(form.get("email") || "").trim().toLowerCase();
   const password = String(form.get("password") || "");
-  const user = await db.user.findUnique({ where: { email } });
-  if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) {
-    return { error: "Invalid email or password" };
+  const sb = await authClient();
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error?.code === "user_banned") return { error: "This login is turned off. Ask your manager to turn it back on." };
+  if (error || !data.user) return { error: "Wrong email or password. Try again, or ask your manager to reset it." };
+  const { data: profile } = await admin().from("User").select("active").eq("id", data.user.id).maybeSingle();
+  if (!profile?.active) {
+    await sb.auth.signOut();
+    return { error: "This login is turned off. Ask the owner to reactivate it." };
   }
-  const token = await signSession({ uid: user.id, role: user.role, name: user.name });
-  (await cookies()).set(SESSION_COOKIE, token, {
-    httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 14,
-  });
   redirect("/dashboard");
 }
 
 export async function logout() {
-  (await cookies()).delete(SESSION_COOKIE);
+  const sb = await authClient();
+  await sb.auth.signOut();
   redirect("/login");
 }

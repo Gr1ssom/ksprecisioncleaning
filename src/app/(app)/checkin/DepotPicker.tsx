@@ -29,9 +29,10 @@ export function DepotPicker({ depots, supplies }: { depots: Depot[]; supplies: {
                   <div className={`text-xs ${have <= 0 ? "text-red-600" : "text-slate-500"}`}>{have} {s.unit} on hand</div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button type="button" className="btn-secondary h-8 w-8 p-0" onClick={() => bump(s.id, -1)}>−</button>
-                  <input name={`qty_${s.id}`} value={q} readOnly className="w-10 text-center text-sm font-semibold bg-transparent" />
-                  <button type="button" className="btn-secondary h-8 w-8 p-0" onClick={() => bump(s.id, 1)}>+</button>
+                  <button type="button" className="btn-secondary h-11 w-11 p-0 text-lg" onClick={() => bump(s.id, -1)}>−</button>
+                  <input type="hidden" name={`qty_${s.id}`} value={q} />
+                  <span className="w-10 text-center text-base font-semibold tabular-nums" aria-live="polite">{q}</span>
+                  <button type="button" className="btn-secondary h-11 w-11 p-0 text-lg" onClick={() => bump(s.id, 1)}>+</button>
                 </div>
               </div>
             );
