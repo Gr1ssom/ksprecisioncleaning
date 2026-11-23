@@ -71,3 +71,17 @@ describe("dates and money", () => {
     expect(lineTotal([{ description: "a", quantity: 3, unitPrice: 185.1 }, { description: "b", quantity: 1, unitPrice: 0.2 }])).toBe(555.5);
   });
 });
+
+import { taskSuggestions } from "../src/lib/tasks";
+describe("one-tap task suggestions in the floor plan editor", () => {
+  const t = (label: string, minutes: number | null = null) => ({ label, minutes, serviceTypeIds: [] as string[] });
+  const common = { Kitchen: [t("Wipe counters", 5), t("Mop floor", 8)], Bathroom: [t("Clean toilet", 6), t("Mop floor", 7)] };
+  it("offers other room types' common tasks and other rooms' own tasks, without repeats", () => {
+    const room = { key: "a", type: "Kitchen", customTasks: [t("clean toilet")] };
+    const rooms = [room, { key: "b", customTasks: [t("Dust piano", 3), t("Wipe counters")] }];
+    // Kitchen's own tasks and "Clean toilet" (already added, any case) are left out.
+    expect(taskSuggestions(common, rooms, room).map((s) => [s.label, s.from, s.minutes])).toEqual([["Dust piano", "This plan", 3]]);
+    const office = { key: "c", type: "Office", customTasks: [] };
+    expect(taskSuggestions(common, [office], office).map((s) => s.label)).toEqual(["Wipe counters", "Mop floor", "Clean toilet"]);
+  });
+});
