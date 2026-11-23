@@ -1,19 +1,22 @@
 import "server-only";
-import { cookies } from "next/headers";
+import { cache } from "react";
 import { redirect } from "next/navigation";
-import { db } from "./db";
-import { SESSION_COOKIE, verifySession, atLeast, type Role } from "./session";
+import { admin, authClient } from "./supabase/server";
+import { atLeast, type Role } from "./session";
+import type { Profile } from "./types";
 
-export async function getSession() {
-  const c = await cookies();
-  return verifySession(c.get(SESSION_COOKIE)?.value);
-}
+/** The signed-in Supabase Auth user + their staff profile (row in "User"), once per request. */
+export const currentUser = cache(async (): Promise<Profile | null> => {
+  const sb = await authClient();
+  const { data } = await sb.auth.getUser(); // verifies the token with Supabase Auth
+  if (!data.user) return null;
+  const { data: profile } = await admin().from("User").select("*").eq("id", data.user.id).maybeSingle();
+  return (profile as Profile | null) ?? null;
+});
 
-/** Load the signed-in user, redirecting to /login (or /dashboard if under-privileged). */
-export async function requireUser(min: Role = "STAFF") {
-  const s = await getSession();
-  if (!s) redirect("/login");
-  const user = await db.user.findUnique({ where: { id: s.uid } });
+/** Require a signed-in, active user with at least `min` role. */
+export async function requireUser(min: Role = "STAFF"): Promise<Profile> {
+  const user = await currentUser();
   if (!user || !user.active) redirect("/login");
   if (!atLeast(user.role, min)) redirect("/dashboard");
   return user;

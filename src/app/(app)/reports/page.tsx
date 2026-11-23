@@ -1,9 +1,12 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import { layoutsWithTasks } from "@/lib/rooms";
+import { RoomHeatmap } from "@/components/RoomHeatmap";
+import type { Assignment, Client, Location, Profile, ServiceType, TimeEntry } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Empty, PageHeader, Stat } from "@/components/ui";
 import { RoomTimeTable } from "@/components/RoomTimeTable";
 import { roomTimeReport } from "@/lib/reports";
-import { hoursBetween, money, todayUTC } from "@/lib/format";
+import { APP_TZ, hoursBetween, money, today } from "@/lib/format";
 import { PrintButton } from "./PrintButton";
 import { rateBook } from "@/lib/pricing";
 
@@ -13,12 +16,16 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   await requireUser("MANAGER");
   const sp = await searchParams;
   const days = Number(sp.days ?? 30);
-  const since = todayUTC(-days);
-  const locations = await db.location.findMany({ where: { active: true }, orderBy: { name: "asc" }, include: { client: true } });
+  const sb = admin();
+  const locations = must(await sb.from("Location").select("*, client:Client(name)").eq("active", true).order("name"), "locations") as (Location & { client: Pick<Client, "name"> | null })[];
   const loc = locations.find((l) => l.id === sp.locationId);
 
   // Company-wide: profitability per location
-  const jobs = await db.assignment.findMany({ where: { date: { gte: since }, status: "COMPLETED" }, include: { location: true, serviceType: true, timeEntry: { include: { user: true } } } });
+  type TE = TimeEntry & { user: Pick<Profile, "hourlyRate"> };
+  const jobs = (must(await sb.from("Assignment")
+    .select("*, location:Location(*), serviceType:ServiceType(name), timeEntry:TimeEntry(*, user:User!TimeEntry_userId_fkey(hourlyRate))")
+    .gte("date", today(-days)).eq("status", "COMPLETED"), "jobs") as (Assignment & { location: Location; serviceType: Pick<ServiceType, "name"> | null; timeEntry: TE | TE[] | null })[])
+    .map((j) => ({ ...j, timeEntry: Array.isArray(j.timeEntry) ? j.timeEntry[0] ?? null : j.timeEntry }));
   const rate = await rateBook();
   const bySvc = new Map<string, { visits: number; revenue: number; hours: number }>();
   const per = new Map<string, { name: string; visits: number; revenue: number; hours: number; labor: number }>();
@@ -35,14 +42,14 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
       const h = hoursBetween(j.timeEntry.clockIn, j.timeEntry.clockOut);
       e.hours += h; e.labor += h * Number(j.timeEntry.user.hourlyRate);
       const [hh, mm] = j.startTime.split(":").map(Number);
-      const local = new Date(j.timeEntry.clockIn.toLocaleString("en-US", { timeZone: "America/Chicago" }));
+      const local = new Date(new Date(j.timeEntry.clockIn).toLocaleString("en-US", { timeZone: APP_TZ }));
       timed++; if (local.getHours() * 60 + local.getMinutes() <= hh * 60 + mm + 10) onTime++;
     }
     per.set(j.locationId, e);
   }
   const rows = [...per.values()].sort((a, b) => b.revenue - a.revenue);
-  const missed = await db.assignment.count({ where: { date: { gte: since }, status: "MISSED" } });
-  const report = loc ? await roomTimeReport(loc.id, days) : null;
+  const missed = (await sb.from("Assignment").select("id", { count: "exact", head: true }).gte("date", today(-days)).eq("status", "MISSED")).count ?? 0;
+  const [report, plans] = loc ? await Promise.all([roomTimeReport(loc.id, days), layoutsWithTasks(loc.id)]) : [null, []];
 
   return (
     <>
@@ -59,6 +66,12 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
             <h2 className="h2">Time by room – {loc.name}</h2>
             <p className="muted">Prepared for {loc.client?.name ?? "client"}. Share or print this to show where cleaning time is spent.</p>
           </div>
+          {report.rooms.length > 0 && plans.some((p) => p.rooms.length) && (
+            <div className="mb-4">
+              <RoomHeatmap layouts={plans.filter((p) => p.rooms.length).map((p) => ({ id: p.id, name: p.name, imageUrl: p.imageUrl, aspect: p.aspect, rooms: p.rooms.map((r) => ({ id: r.id, name: r.name, points: r.points, color: r.color })) }))}
+                minutes={Object.fromEntries(report.rooms.map((r) => [r.roomId, r.avgMin]))} />
+            </div>
+          )}
           {report.rooms.length ? <RoomTimeTable report={report} /> : <Empty>No room timers recorded here yet. Staff start them from the job&apos;s room map.</Empty>}
         </section>
       ) : (

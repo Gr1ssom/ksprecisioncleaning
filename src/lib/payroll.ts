@@ -1,6 +1,7 @@
 import "server-only";
-import { db } from "./db";
+import { admin, must } from "./supabase/server";
 import { hoursBetween } from "./format";
+import type { Profile, TimeEntry } from "./types";
 
 export type PayrollRow = {
   userId: string; name: string; email: string; waveEmployeeId: string | null; rate: number;
@@ -9,11 +10,11 @@ export type PayrollRow = {
 
 /** Hours per employee in [from, to). Overtime = hours over 40 in any Mon–Sun week. */
 export async function payrollFor(from: Date, to: Date, approvedOnly: boolean): Promise<PayrollRow[]> {
-  const entries = await db.timeEntry.findMany({
-    where: { clockIn: { gte: from, lt: to }, clockOut: { not: null } },
-    include: { user: true },
-    orderBy: { clockIn: "asc" },
-  });
+  const entries = must(
+    await admin().from("TimeEntry").select("*, user:User!TimeEntry_userId_fkey(*)")
+      .gte("clockIn", from.toISOString()).lt("clockIn", to.toISOString()).not("clockOut", "is", null).order("clockIn"),
+    "time entries",
+  ) as (TimeEntry & { user: Profile })[];
   const rows = new Map<string, PayrollRow & { weeks: Map<string, number> }>();
   for (const e of entries) {
     const r = rows.get(e.userId) ?? {

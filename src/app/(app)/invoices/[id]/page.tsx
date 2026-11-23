@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Client, Invoice } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Badge, PageHeader } from "@/components/ui";
-import { fmtDate, fmtDateTime, money, type Line } from "@/lib/format";
+import { fmtDate, fmtDateTime, money } from "@/lib/format";
 import { waveConfigured } from "@/lib/wave";
 import { InvoiceActions } from "./InvoiceActions";
 
@@ -11,9 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
   await requireUser("MANAGER");
   const { id } = await params;
-  const inv = await db.invoice.findUnique({ where: { id }, include: { client: true } });
+  const inv = must(await admin().from("Invoice").select("*, client:Client(*)").eq("id", id).maybeSingle(), "invoice") as (Invoice & { client: Client }) | null;
   if (!inv) notFound();
-  const lines = inv.lines as Line[];
+  const lines = inv.lines;
   return (
     <>
       <PageHeader title={`Invoice ${inv.number}`} subtitle={inv.client.name} action={<Badge value={inv.status} />} />

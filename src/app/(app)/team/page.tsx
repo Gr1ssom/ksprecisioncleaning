@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Profile } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Badge, PageHeader } from "@/components/ui";
 import { saveUser } from "@/app/actions/manage";
@@ -31,7 +32,7 @@ function UserForm({ u, owner }: { u?: U; owner: boolean }) {
 export default async function Team() {
   const me = await requireUser("MANAGER");
   const owner = me.role === "OWNER";
-  const users = await db.user.findMany({ orderBy: [{ active: "desc" }, { role: "desc" }, { name: "asc" }] });
+  const users = must(await admin().from("User").select("*").order("active", { ascending: false }).order("role", { ascending: false }).order("name"), "team") as Profile[];
   return (
     <>
       <PageHeader title="Team" subtitle={owner ? "Roles, pay rates and logins" : "Managers can add staff. The owner sets roles and pay."} />

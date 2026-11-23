@@ -1,20 +1,23 @@
 import { MapPin } from "lucide-react";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Location, Profile, Sop, SopAck } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { saveSop } from "@/app/actions/manage";
 import { AckButton } from "./AckButton";
+import { fmtDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function Sops({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
   const { q } = await searchParams;
-  const sops = await db.sop.findMany({
-    where: q ? { OR: [{ title: { contains: q, mode: "insensitive" } }, { body: { contains: q, mode: "insensitive" } }] } : {},
-    include: { location: true, acks: { include: { user: true } } }, orderBy: [{ category: "asc" }, { title: "asc" }],
-  });
-  const staffCount = await db.user.count({ where: { active: true } });
+  const sb = admin();
+  let query = sb.from("Sop").select("*, location:Location(name), acks:SopAck(*, user:User(name))").order("category").order("title");
+  const term = (q ?? "").replace(/[,()*%\\]/g, " ").trim();
+  if (term) query = query.or(`title.ilike.*${term}*,body.ilike.*${term}*`);
+  const sops = must(await query, "SOPs") as (Sop & { location: Pick<Location, "name"> | null; acks: (SopAck & { user: Pick<Profile, "name"> })[] })[];
+  const staffCount = (await sb.from("User").select("id", { count: "exact", head: true }).eq("active", true)).count ?? 0;
   const mgr = user.role !== "STAFF";
   const groups = new Map<string, typeof sops>();
   for (const s of sops) groups.set(s.category, [...(groups.get(s.category) ?? []), s]);
@@ -38,7 +41,7 @@ export default async function Sops({ searchParams }: { searchParams: Promise<{ q
                   </summary>
                   <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm">{s.body.split("\n").filter(Boolean).map((l, i) => <li key={i}>{l}</li>)}</ol>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500">
-                    <span>Version {s.version} · updated {s.updatedAt.toLocaleDateString()}{mgr && ` · read by ${current.length}/${staffCount}: ${current.map((a) => a.user.name.split(" ")[0]).join(", ") || "nobody yet"}`}</span>
+                    <span>Version {s.version} · updated {fmtDate(s.updatedAt)}{mgr && ` · read by ${current.length}/${staffCount}: ${current.map((a) => a.user.name.split(" ")[0]).join(", ") || "nobody yet"}`}</span>
                     {!acked && <AckButton id={s.id} />}
                   </div>
                   {mgr && !s.locationId && (

@@ -1,11 +1,12 @@
 import { KeyRound, MapPin, Package } from "lucide-react";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Assignment, Checkin, Location, Profile, StockLevel, Supply, SupplyDepot, TimeEntry } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { GeoForm } from "@/components/GeoForm";
 import { Empty, FenceBadge, PageHeader, Badge } from "@/components/ui";
 import { supplyPickup, siteCheckIn, siteCheckOut } from "@/app/actions/field";
-import { fmtDateTime, fmtTime, todayUTC } from "@/lib/format";
+import { fmtDateTime, fmtTime, today } from "@/lib/format";
 import { DepotPicker } from "./DepotPicker";
 
 export const dynamic = "force-dynamic";
@@ -14,16 +15,22 @@ export default async function CheckinPage({ searchParams }: { searchParams: Prom
   const user = await requireUser();
   const sp = await searchParams;
   const mode = sp.mode === "pickup" ? "pickup" : "site";
-  const [active, jobs, depots, supplies, recent] = await Promise.all([
-    db.timeEntry.findFirst({ where: { userId: user.id, clockOut: null }, include: { assignment: { include: { location: true } } } }),
-    db.assignment.findMany({
-      where: { date: { gte: todayUTC(-1), lte: todayUTC() }, status: { in: ["SCHEDULED", "IN_PROGRESS"] }, ...(user.role === "STAFF" ? { userId: user.id } : {}) },
-      include: { location: true, user: true }, orderBy: [{ date: "desc" }, { startTime: "asc" }],
-    }),
-    db.supplyDepot.findMany({ include: { stock: true }, orderBy: { name: "asc" } }),
-    db.supply.findMany({ orderBy: { name: "asc" } }),
-    db.checkin.findMany({ where: { userId: user.id }, include: { location: true, depot: true }, orderBy: { at: "desc" }, take: 8 }),
+  const sb = admin();
+  let jq = sb.from("Assignment").select("*, location:Location(*), user:User!Assignment_userId_fkey(name)")
+    .gte("date", today(-1)).lte("date", today()).in("status", ["SCHEDULED", "IN_PROGRESS"]).order("date", { ascending: false }).order("startTime");
+  if (user.role === "STAFF") jq = jq.eq("userId", user.id);
+  const [ar, jr, dr, sr, rr] = await Promise.all([
+    sb.from("TimeEntry").select("*, assignment:Assignment(*, location:Location(*))").eq("userId", user.id).is("clockOut", null).limit(1).maybeSingle(),
+    jq,
+    sb.from("SupplyDepot").select("*, stock:StockLevel(*)").order("name"),
+    sb.from("Supply").select("*").order("name"),
+    sb.from("Checkin").select("*, location:Location(name), depot:SupplyDepot(name)").eq("userId", user.id).order("at", { ascending: false }).limit(8),
   ]);
+  const active = must(ar, "clock") as (TimeEntry & { assignment: (Assignment & { location: Location }) | null }) | null;
+  const jobs = must(jr, "jobs") as (Assignment & { location: Location; user: Pick<Profile, "name"> | null })[];
+  const depots = must(dr, "pickup locations") as (SupplyDepot & { stock: StockLevel[] })[];
+  const supplies = must(sr, "supplies") as Supply[];
+  const recent = must(rr, "check-ins") as (Checkin & { location: Pick<Location, "name"> | null; depot: Pick<SupplyDepot, "name"> | null })[];
 
   return (
     <>

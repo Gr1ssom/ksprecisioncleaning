@@ -13,21 +13,26 @@ export const fmtDateTime = (d: Date | string) =>
 export const fmtTime = (d: Date | string) =>
   new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: APP_TZ });
 
-export const hoursBetween = (a: Date, b: Date | null) =>
-  b ? Math.max(0, (b.getTime() - a.getTime()) / 3_600_000) : 0;
+type When = Date | string;
+const ms = (d: When) => (typeof d === "string" ? new Date(d).getTime() : d.getTime());
 
-/** Today's date as a UTC-midnight Date, matching @db.Date columns. */
+export const hoursBetween = (a: When, b: When | null | undefined) =>
+  b ? Math.max(0, (ms(b) - ms(a)) / 3_600_000) : 0;
+
+/** Today's business date as a UTC-midnight Date (DATE columns are compared as YYYY-MM-DD). */
 export function todayUTC(offsetDays = 0) {
   const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ, year: "numeric", month: "2-digit", day: "2-digit" })
     .format(new Date()).split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + offsetDays));
 }
 
-export const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+export const isoDay = (d: When) => (typeof d === "string" ? d.slice(0, 10) : d.toISOString().slice(0, 10));
+
+/** Business date as "YYYY-MM-DD", offset by n days — use for DATE column filters. */
+export const today = (offsetDays = 0) => isoDay(todayUTC(offsetDays));
 
 export type Task = { label: string; done: boolean };
 export type Line = { description: string; quantity: number; unitPrice: number };
-export type Pin = { x: number; y: number; label: string; note?: string; color?: string };
 
 export const lineTotal = (lines: Line[]) =>
   Math.round(lines.reduce((s, l) => s + Number(l.quantity) * Number(l.unitPrice), 0) * 100) / 100;

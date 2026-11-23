@@ -1,9 +1,10 @@
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Assignment, Location, Profile, ServiceType } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Badge, Empty, PageHeader } from "@/components/ui";
-import { isoDay, todayUTC, type Task } from "@/lib/format";
+import { isoDay, todayUTC } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +16,15 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
   const monday = new Date(t.getTime() - ((t.getUTCDay() + 6) % 7) * 86400_000 + offset * 7 * 86400_000);
   const days = Array.from({ length: 7 }, (_, i) => new Date(monday.getTime() + i * 86400_000));
   const staffView = user.role === "STAFF";
-  const [jobs, staff] = await Promise.all([
-    db.assignment.findMany({
-      where: { date: { gte: days[0], lte: days[6] }, ...(staffView ? { OR: [{ userId: user.id }, { userId: null }] } : sp.who ? { userId: sp.who === "open" ? null : sp.who } : {}) },
-      include: { location: true, user: true, serviceType: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }],
-    }),
-    staffView ? [] : db.user.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
-  ]);
+  const sb = admin();
+  let jq = sb.from("Assignment").select("*, location:Location(name), user:User!Assignment_userId_fkey(name), serviceType:ServiceType(name)")
+    .gte("date", isoDay(days[0])).lte("date", isoDay(days[6])).order("date").order("startTime");
+  if (staffView) jq = jq.or(`userId.eq.${user.id},userId.is.null`);
+  else if (sp.who === "open") jq = jq.is("userId", null);
+  else if (sp.who) jq = jq.eq("userId", sp.who);
+  const [jr, ur] = await Promise.all([jq, staffView ? null : sb.from("User").select("id, name").eq("active", true).order("name")]);
+  const jobs = must(jr, "jobs") as (Assignment & { location: Pick<Location, "name">; user: Pick<Profile, "name"> | null; serviceType: Pick<ServiceType, "name"> | null })[];
+  const staff = ur ? (must(ur, "team") as Pick<Profile, "id" | "name">[]) : [];
   const q = (o: Record<string, string | number | undefined>) => "?" + new URLSearchParams(Object.entries({ week: offset, who: sp.who, ...o }).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)])).toString();
 
   return (
@@ -52,7 +55,7 @@ export default async function Jobs({ searchParams }: { searchParams: Promise<{ w
               </div>
               <div className="space-y-1.5">
                 {dayJobs.map((j) => {
-                  const tk = (j.tasks as Task[]) ?? [];
+                  const tk = j.tasks ?? [];
                   return (
                     <Link key={j.id} href={`/jobs/${j.id}`} className={`block rounded-lg border p-2 text-xs hover:border-brand-500 ${j.userId ? "border-slate-200 bg-surface" : "border-dashed border-amber-400 bg-surface"}`}>
                       <div className="font-semibold text-slate-900">{j.startTime} · {j.location.name}</div>

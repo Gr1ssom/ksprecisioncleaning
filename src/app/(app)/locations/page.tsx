@@ -1,6 +1,7 @@
 import { BookOpen, Handshake, Map as MapIcon } from "lucide-react";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Client, Location } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 
@@ -8,10 +9,10 @@ export const dynamic = "force-dynamic";
 
 export default async function Locations() {
   const user = await requireUser();
-  const locations = await db.location.findMany({
-    where: user.role === "STAFF" ? { active: true } : {},
-    include: { client: true, _count: { select: { sops: true, layouts: true } } }, orderBy: [{ active: "desc" }, { name: "asc" }],
-  });
+  let lq = admin().from("Location").select("*, client:Client(name), sops:Sop(count), layouts:Layout(count)").order("active", { ascending: false }).order("name");
+  if (user.role === "STAFF") lq = lq.eq("active", true);
+  const locations = (must(await lq, "locations") as (Location & { client: Pick<Client, "name"> | null; sops: { count: number }[]; layouts: { count: number }[] })[])
+    .map((l) => ({ ...l, _count: { sops: l.sops[0]?.count ?? 0, layouts: l.layouts[0]?.count ?? 0 } }));
   return (
     <>
       <PageHeader title="Locations" subtitle="Site info, SOPs and floor plans" action={user.role !== "STAFF" && <Link href="/locations/new" className="btn-primary">New location</Link>} />

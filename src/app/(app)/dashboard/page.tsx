@@ -1,20 +1,21 @@
 import { Clock, MapPin, Megaphone, Package } from "lucide-react";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Announcement, Assignment, Checkin, Invoice, Location, Profile, StockLevel, Supply, SupplyDepot, TimeEntry } from "@/lib/types";
 import { postAnnouncement } from "@/app/actions/manage";
 import { rateBook } from "@/lib/pricing";
 import { requireUser } from "@/lib/auth";
 import { Badge, Empty, FenceBadge, PageHeader, Stat } from "@/components/ui";
-import { fmtDate, fmtDateTime, fmtTime, hoursBetween, money, todayUTC, type Task } from "@/lib/format";
+import { APP_TZ, fmtDate, fmtDateTime, fmtTime, hoursBetween, money, today, todayUTC } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
   const user = await requireUser();
-  const announcements = await db.announcement.findMany({ orderBy: { createdAt: "desc" }, take: 2 });
+  const announcements = must(await admin().from("Announcement").select("*").order("createdAt", { ascending: false }).limit(2), "announcements") as Announcement[];
   return (
     <>
-      <PageHeader title={`Hi, ${user.name.split(" ")[0]}`} subtitle={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "America/Chicago" })} />
+      <PageHeader title={`Hi, ${user.name.split(" ")[0]}`} subtitle={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: APP_TZ })} />
       {announcements.map((a) => (
         <div key={a.id} className="mb-4 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm">
           <div className="font-semibold text-slate-900"><Megaphone className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.title}</div>
@@ -27,14 +28,20 @@ export default async function Dashboard() {
 }
 
 async function StaffDash({ userId }: { userId: string }) {
-  const today = todayUTC();
-  const [jobs, upcoming, active, weekEntries, open] = await Promise.all([
-    db.assignment.findMany({ where: { userId, date: today, status: { not: "CANCELLED" } }, include: { location: true, serviceType: true }, orderBy: { startTime: "asc" } }),
-    db.assignment.findMany({ where: { userId, date: { gt: today, lte: todayUTC(7) }, status: "SCHEDULED" }, include: { location: true, serviceType: true }, orderBy: [{ date: "asc" }, { startTime: "asc" }] }),
-    db.timeEntry.findFirst({ where: { userId, clockOut: null }, include: { assignment: { include: { location: true } } } }),
-    db.timeEntry.findMany({ where: { userId, clockIn: { gte: todayUTC(-((todayUTC().getUTCDay() + 6) % 7)) } } }),
-    db.assignment.findMany({ where: { userId: null, date: { gte: today }, status: "SCHEDULED" }, include: { location: true }, take: 3 }),
+  const sb = admin();
+  const J = "*, location:Location(name, address), serviceType:ServiceType(name)";
+  const [r1, r2, r3, r4, r5] = await Promise.all([
+    sb.from("Assignment").select(J).eq("userId", userId).eq("date", today()).neq("status", "CANCELLED").order("startTime"),
+    sb.from("Assignment").select(J).eq("userId", userId).gt("date", today()).lte("date", today(7)).eq("status", "SCHEDULED").order("date").order("startTime"),
+    sb.from("TimeEntry").select("*, assignment:Assignment(location:Location(name))").eq("userId", userId).is("clockOut", null).limit(1).maybeSingle(),
+    sb.from("TimeEntry").select("clockIn, clockOut").eq("userId", userId).gte("clockIn", todayUTC(-((todayUTC().getUTCDay() + 6) % 7)).toISOString()),
+    sb.from("Assignment").select(J).is("userId", null).gte("date", today()).eq("status", "SCHEDULED").order("date").limit(3),
   ]);
+  const jobs = must(r1, "jobs") as JobRow[];
+  const upcoming = must(r2, "upcoming") as JobRow[];
+  const active = must(r3, "clock") as (TimeEntry & { assignment: { location: Pick<Location, "name"> } | null }) | null;
+  const weekEntries = must(r4, "hours") as Pick<TimeEntry, "clockIn" | "clockOut">[];
+  const open = must(r5, "open shifts") as JobRow[];
   const weekHours = weekEntries.reduce((s, e) => s + hoursBetween(e.clockIn, e.clockOut ?? new Date()), 0);
   return (
     <div className="space-y-5">
@@ -76,12 +83,12 @@ async function StaffDash({ userId }: { userId: string }) {
   );
 }
 
-type JobRow = { id: string; date: Date; startTime: string; endTime: string | null; status: string; tasks: unknown; location: { name: string; address: string }; user?: { name: string } | null; serviceType?: { name: string } | null };
+type JobRow = Assignment & { location: { name: string; address?: string }; user?: { name: string } | null; serviceType?: { name: string } | null };
 function JobList({ jobs, showDate, showUser }: { jobs: JobRow[]; showDate?: boolean; showUser?: boolean }) {
   return (
     <div className="space-y-2">
       {jobs.map((j) => {
-        const t = (j.tasks as Task[]) ?? [];
+        const t = j.tasks ?? [];
         return (
           <Link key={j.id} href={`/jobs/${j.id}`} className="card flex items-center justify-between gap-3 hover:border-brand-500">
             <div className="min-w-0">
@@ -103,20 +110,31 @@ function JobList({ jobs, showDate, showUser }: { jobs: JobRow[]; showDate?: bool
 }
 
 async function ManagerDash({ owner }: { owner: boolean }) {
-  const today = todayUTC();
-  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-  const [jobs, onClock, flagged, issues, stock, unapproved, outstanding, paidMonth, unbilled, monthHours] = await Promise.all([
-    db.assignment.findMany({ where: { date: today, status: { not: "CANCELLED" } }, include: { location: true, user: true, serviceType: true }, orderBy: { startTime: "asc" } }),
-    db.timeEntry.findMany({ where: { clockOut: null }, include: { user: true, assignment: { include: { location: true } } } }),
-    db.checkin.findMany({ where: { withinFence: false, at: { gte: todayUTC(-7) } }, include: { user: true, location: true, depot: true }, orderBy: { at: "desc" }, take: 5 }),
-    db.issue.count({ where: { status: "OPEN" } }),
-    db.stockLevel.findMany({ include: { supply: true, depot: true } }),
-    db.timeEntry.count({ where: { approved: false, clockOut: { not: null } } }),
-    db.invoice.aggregate({ where: { status: "SENT" }, _sum: { total: true }, _count: true }),
-    db.invoice.aggregate({ where: { status: "PAID", issueDate: { gte: monthStart } }, _sum: { total: true } }),
-    db.assignment.findMany({ where: { status: "COMPLETED", invoiceId: null, location: { clientId: { not: null } } }, include: { location: true } }),
-    db.timeEntry.findMany({ where: { clockIn: { gte: monthStart }, clockOut: { not: null } }, include: { user: true } }),
+  const sb = admin();
+  const monthStart = today().slice(0, 8) + "01";
+  const [r1, r2, r3, r4, r5, r6, r7, r8, r9] = await Promise.all([
+    sb.from("Assignment").select("*, location:Location(name), user:User!Assignment_userId_fkey(name), serviceType:ServiceType(name)").eq("date", today()).neq("status", "CANCELLED").order("startTime"),
+    sb.from("TimeEntry").select("*, user:User!TimeEntry_userId_fkey(name), assignment:Assignment(location:Location(name))").is("clockOut", null),
+    sb.from("Checkin").select("*, user:User(name), location:Location(name), depot:SupplyDepot(name)").eq("withinFence", false).gte("at", todayUTC(-7).toISOString()).order("at", { ascending: false }).limit(5),
+    sb.from("Issue").select("id", { count: "exact", head: true }).eq("status", "OPEN"),
+    sb.from("StockLevel").select("*, supply:Supply(name, reorderAt), depot:SupplyDepot(name)"),
+    sb.from("TimeEntry").select("id", { count: "exact", head: true }).eq("approved", false).not("clockOut", "is", null),
+    sb.from("Invoice").select("status, total, issueDate").in("status", ["SENT", "PAID"]),
+    sb.from("Assignment").select("serviceTypeId, location:Location!inner(clientId)").eq("status", "COMPLETED").is("invoiceId", null).not("location.clientId", "is", null),
+    sb.from("TimeEntry").select("clockIn, clockOut, user:User!TimeEntry_userId_fkey(hourlyRate)").gte("clockIn", new Date(monthStart + "T06:00:00Z").toISOString()).not("clockOut", "is", null),
   ]);
+  const jobs = must(r1, "jobs") as JobRow[];
+  const onClock = must(r2, "on the clock") as (TimeEntry & { user: Pick<Profile, "name">; assignment: { location: Pick<Location, "name"> } | null })[];
+  const flagged = must(r3, "flags") as (Checkin & { user: Pick<Profile, "name">; location: Pick<Location, "name"> | null; depot: Pick<SupplyDepot, "name"> | null })[];
+  const issues = r4.count ?? 0;
+  const stock = must(r5, "stock") as (StockLevel & { supply: Pick<Supply, "name" | "reorderAt">; depot: Pick<SupplyDepot, "name"> })[];
+  const unapproved = r6.count ?? 0;
+  const invoices = must(r7, "invoices") as Pick<Invoice, "status" | "total" | "issueDate">[];
+  const sent = invoices.filter((i) => i.status === "SENT");
+  const outstanding = { total: sent.reduce((s, i) => s + Number(i.total), 0), count: sent.length };
+  const paidMonth = invoices.filter((i) => i.status === "PAID" && i.issueDate >= monthStart).reduce((s, i) => s + Number(i.total), 0);
+  const unbilled = must(r8, "unbilled") as unknown as { serviceTypeId: string | null; location: { clientId: string | null } }[];
+  const monthHours = must(r9, "labor") as unknown as { clockIn: string; clockOut: string; user: Pick<Profile, "hourlyRate"> }[];
   const low = stock.filter((s) => s.quantity <= s.supply.reorderAt);
   const unassigned = jobs.filter((j) => !j.userId).length;
   const rate = await rateBook();
@@ -134,8 +152,8 @@ async function ManagerDash({ owner }: { owner: boolean }) {
       </div>
       {owner && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Stat label="Outstanding A/R" value={money(outstanding._sum.total)} hint={`${outstanding._count} sent invoices`} tone="blue" href="/invoices" />
-          <Stat label="Paid this month" value={money(paidMonth._sum.total)} tone="green" />
+          <Stat label="Outstanding A/R" value={money(outstanding.total)} hint={`${outstanding.count} sent invoices`} tone="blue" href="/invoices" />
+          <Stat label="Paid this month" value={money(paidMonth)} tone="green" />
           <Stat label="Ready to bill" value={money(unbilledAmt)} hint={unpriced ? `${unpriced} visit${unpriced === 1 ? " has" : "s have"} no price set` : `${unbilled.length} completed visits`} tone={unpriced ? "amber" : "slate"} href="/invoices/new" />
           <Stat label="Labor this month" value={money(laborMonth)} hint={`${unapproved} entries to approve`} href="/payroll" />
         </div>

@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import type { Assignment, Location, Profile, TimeEntry } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Empty, PageHeader, Stat } from "@/components/ui";
 import { editTime } from "@/app/actions/manage";
@@ -8,7 +9,8 @@ import { ApproveButton } from "./ApproveButton";
 export const dynamic = "force-dynamic";
 
 // datetime-local value in business timezone
-const local = (d: Date | null) => {
+const local = (iso: string | null) => {
+  const d = iso ? new Date(iso) : null;
   if (!d) return "";
   const p = new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
   const g = (t: string) => p.find((x) => x.type === t)!.value;
@@ -20,13 +22,14 @@ export default async function TimePage({ searchParams }: { searchParams: Promise
   const sp = await searchParams;
   const days = Number(sp.days ?? 14);
   const mgr = user.role !== "STAFF";
-  const entries = await db.timeEntry.findMany({
-    where: { clockIn: { gte: todayUTC(-days) }, ...(mgr ? (sp.who ? { userId: sp.who } : {}) : { userId: user.id }) },
-    include: { user: true, assignment: { include: { location: true } } }, orderBy: { clockIn: "desc" },
-  });
+  const sb = admin();
+  let eq = sb.from("TimeEntry").select("*, user:User!TimeEntry_userId_fkey(name), assignment:Assignment(location:Location(name))")
+    .gte("clockIn", todayUTC(-days).toISOString()).order("clockIn", { ascending: false });
+  if (!mgr) eq = eq.eq("userId", user.id); else if (sp.who) eq = eq.eq("userId", sp.who);
+  const entries = must(await eq, "time entries") as (TimeEntry & { user: Pick<Profile, "name">; assignment: (Pick<Assignment, "id"> & { location: Pick<Location, "name"> }) | null })[];
   const total = entries.reduce((s, e) => s + hoursBetween(e.clockIn, e.clockOut), 0);
   const pending = entries.filter((e) => !e.approved && e.clockOut);
-  const staff = mgr ? await db.user.findMany({ where: { active: true }, orderBy: { name: "asc" } }) : [];
+  const staff = mgr ? (must(await sb.from("User").select("id, name").eq("active", true).order("name"), "team") as Pick<Profile, "id" | "name">[]) : [];
 
   return (
     <>

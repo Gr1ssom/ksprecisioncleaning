@@ -1,4 +1,6 @@
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import { signedUrls } from "@/lib/storage";
+import type { Issue, Location, Profile } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Badge, Empty, PageHeader } from "@/components/ui";
 import { reportIssue } from "@/app/actions/field";
@@ -11,10 +13,13 @@ export default async function Issues({ searchParams }: { searchParams: Promise<{
   const user = await requireUser();
   const sp = await searchParams;
   const status = sp.status === "RESOLVED" ? "RESOLVED" : "OPEN";
-  const [issues, locations] = await Promise.all([
-    db.issue.findMany({ where: { status, ...(user.role === "STAFF" ? { reportedById: user.id } : {}) }, include: { location: true, reportedBy: true }, orderBy: { createdAt: "desc" } }),
-    db.location.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
-  ]);
+  const sb = admin();
+  let iq = sb.from("Issue").select("*, location:Location(name), reportedBy:User(name)").eq("status", status).order("createdAt", { ascending: false });
+  if (user.role === "STAFF") iq = iq.eq("reportedById", user.id);
+  const [ir, lr] = await Promise.all([iq, sb.from("Location").select("id, name").eq("active", true).order("name")]);
+  const issues = must(ir, "issues") as (Issue & { location: Pick<Location, "name"> | null; reportedBy: Pick<Profile, "name"> })[];
+  const locations = must(lr, "locations") as Pick<Location, "id" | "name">[];
+  const photos = await signedUrls(issues.map((i) => i.photoPath));
   return (
     <>
       <PageHeader title="Issues" subtitle="Damage, broken fixtures, client requests, safety problems." />
@@ -39,7 +44,7 @@ export default async function Issues({ searchParams }: { searchParams: Promise<{
       <div className="space-y-3">
         {issues.map((i) => (
           <div key={i.id} className="card flex gap-4">
-            {i.photoData && <a href={i.photoData} target="_blank" rel="noreferrer"><img src={i.photoData} alt="" className="h-20 w-20 rounded-lg object-cover" /></a>}
+            {i.photoPath && photos[i.photoPath] && <a href={photos[i.photoPath]} target="_blank" rel="noreferrer"><img src={photos[i.photoPath]} alt="" className="h-20 w-20 rounded-lg object-cover" /></a>}
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2"><div className="font-semibold">{i.title}</div><Badge value={i.status} /></div>
               <div className="text-xs text-slate-500">{i.location?.name ?? "General"} · {i.reportedBy.name} · {fmtDateTime(i.createdAt)}</div>

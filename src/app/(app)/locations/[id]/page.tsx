@@ -1,7 +1,9 @@
 import { KeyRound } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { admin, must } from "@/lib/supabase/server";
+import { RoomHeatmap } from "@/components/RoomHeatmap";
+import type { Client, Location, Sop } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { layoutsWithTasks } from "@/lib/rooms";
 import { PageHeader } from "@/components/ui";
@@ -16,12 +18,14 @@ export const dynamic = "force-dynamic";
 export default async function LocationPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const loc = await db.location.findUnique({ where: { id }, include: { client: true, sops: { orderBy: { title: "asc" } } } });
+  const sb = admin();
+  const loc = must(await sb.from("Location").select("*, client:Client(name), sops:Sop(*)").eq("id", id).maybeSingle(), "location") as (Location & { client: Pick<Client, "name"> | null; sops: Sop[] }) | null;
   if (!loc) notFound();
+  loc.sops.sort((a, b) => a.title.localeCompare(b.title));
   const mgr = user.role !== "STAFF";
   const [layouts, clients, report] = await Promise.all([
     layoutsWithTasks(id),
-    mgr ? db.client.findMany({ orderBy: { name: "asc" } }) : [],
+    mgr ? (must(await sb.from("Client").select("id, name").order("name"), "clients") as Pick<Client, "id" | "name">[]) : [],
     mgr ? roomTimeReport(id, 90) : null,
   ]);
 
@@ -62,6 +66,12 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
       {report && report.rooms.length > 0 && (
         <section className="mb-6">
           <div className="mb-2 flex items-center justify-between"><h2 className="h2">Where time goes (90 days)</h2><Link href={`/reports?locationId=${loc.id}`} className="text-sm text-brand-600">Client report →</Link></div>
+          {layouts.some((l) => l.rooms.length) && (
+            <div className="mb-3">
+              <RoomHeatmap layouts={layouts.filter((l) => l.rooms.length).map((l) => ({ id: l.id, name: l.name, imageUrl: l.imageUrl, aspect: l.aspect, rooms: l.rooms }))}
+                minutes={Object.fromEntries(report.rooms.map((r) => [r.roomId, r.avgMin]))} />
+            </div>
+          )}
           <RoomTimeTable report={report} />
         </section>
       )}
