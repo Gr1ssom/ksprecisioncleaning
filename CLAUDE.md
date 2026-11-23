@@ -50,6 +50,11 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
 - `npm run demo:seed` (needs `ALLOW_DEMO_SEED=1`) loads @ks.test demo logins and data;
   `-- --clear` removes all business data. Both refuse once a real team member exists.
 - Invoice numbers come from the `invoice_number_seq` sequence (column default). Never compute them.
+- **Live updates:** every app table has the `app_change` statement trigger (`notify_app_change()`),
+  which pings the private Realtime topic `app` with the table name only. `LiveRefresh` (in the app
+  layout) hears it and calls `router.refresh()`, so pages stay current while data is still read on
+  the server. New tables get the trigger in the same migration. The browser client
+  (`src/lib/supabase/browser.ts`) is for that subscription only: never read data with it.
 - **Audit log:** every change to hours, prices, roles/logins, invoices, stock, locations, SOPs or job
   status calls `audit()` (`src/lib/audit.ts`) with a one-line summary and `diff()` of the changed
   fields. Never put passwords, codes or keys in it. The owner reads it on the Activity page.
@@ -96,6 +101,16 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
 - Invoice lines snapshot the price when the invoice is created (`Invoice.lines`), so changing a rate
   later doesn't change old invoices.
 - Service types are retired (`active = false`), not deleted, so old jobs keep their label.
+
+## SOPs
+- An SOP applies to the whole company, one client (`clientId`, every location of theirs) or one
+  location (`locationId`); `sopApplies()` in `src/lib/sops.ts` is the rule. Its content is any mix
+  of typed steps (`body`), a link (`linkUrl`, usually Google Drive) and an uploaded file
+  (`filePath` in the `media` bucket, opened through `signedUrls()`).
+- Add and edit through `SopForm`; show with `SopContent`. Google Drive is link-only (paste the share
+  link): there is no Drive API connection, so don't claim files sync or that access is checked.
+- A client and its locations can be created on one form (Clients page). Locations added there are
+  geocoded from the address on save (`src/lib/geocode.ts`), best effort.
 
 ## Floor plans and room timers
 - A `Layout` belongs to a location; `Room`s are polygons in **percent of the canvas** (`points`).

@@ -4,11 +4,15 @@ import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
 import { saveClient } from "@/app/actions/manage";
 import { money } from "@/lib/format";
+import Link from "next/link";
+import { BookOpen, MapPin } from "lucide-react";
+import { NewLocations } from "./NewLocations";
 
 export const dynamic = "force-dynamic";
 
 type Svc = { id: string; name: string };
-type C = { rates?: { serviceTypeId: string; price: unknown }[]; id?: string; name?: string; contactName?: string | null; email?: string | null; phone?: string | null; billingAddress?: string | null; waveCustomerId?: string | null; notes?: string | null };
+type Loc = { id: string; name: string; address: string; latitude: number | null; active: boolean };
+type C = { locations?: Loc[]; sops?: { id: string; title: string }[]; rates?: { serviceTypeId: string; price: unknown }[]; id?: string; name?: string; contactName?: string | null; email?: string | null; phone?: string | null; billingAddress?: string | null; waveCustomerId?: string | null; notes?: string | null };
 function ClientFields({ c, services }: { c?: C; services: Svc[] }) {
   return (
     <form action={saveClient} className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -37,6 +41,35 @@ function ClientFields({ c, services }: { c?: C; services: Svc[] }) {
         </div>
         <p className="mt-1 text-xs text-slate-500">Leave blank if you don&apos;t offer that service to this client. Visits without a price can&apos;t be invoiced.</p>
       </fieldset>
+      <fieldset className="sm:col-span-2">
+        <legend className="label">Locations</legend>
+        {c?.locations && c.locations.length > 0 && (
+          <ul className="mb-2 divide-y divide-slate-100 rounded-md border border-slate-200 text-sm">
+            {c.locations.map((l) => (
+              <li key={l.id}>
+                <Link href={`/locations/${l.id}`} className="flex min-h-11 flex-wrap items-center gap-x-2 px-3 py-1.5 hover:underline">
+                  <MapPin className="h-4 w-4 shrink-0 text-slate-500" /><span className="font-semibold">{l.name}</span>
+                  <span className="text-slate-500">{l.address}</span>
+                  {!l.active && <span className="badge bg-slate-100 text-slate-700">inactive</span>}
+                  {l.latitude == null && <span className="badge bg-amber-100 text-amber-800">no map position</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        <NewLocations start={c?.id ? 0 : 1} />
+      </fieldset>
+      {c?.id && (
+        <fieldset className="sm:col-span-2">
+          <legend className="label">SOPs for this client</legend>
+          {c.sops && c.sops.length > 0 && (
+            <ul className="mb-2 divide-y divide-slate-100 rounded-md border border-slate-200 text-sm">
+              {c.sops.map((s) => <li key={s.id}><Link href={`/sops#${s.id}`} className="flex min-h-11 items-center gap-2 px-3 hover:underline"><BookOpen className="h-4 w-4 shrink-0 text-slate-500" />{s.title}</Link></li>)}
+            </ul>
+          )}
+          <Link href={`/sops?for=client:${c.id}#new`} className="btn-secondary">Add SOP</Link>
+        </fieldset>
+      )}
       <button className="btn-primary w-fit">Save</button>
     </form>
   );
@@ -46,12 +79,12 @@ export default async function Clients() {
   await requireUser("MANAGER");
   const sb = admin();
   const [c, st] = await Promise.all([
-    sb.from("Client").select("*, locations:Location(id), rates:ClientRate(*), invoices:Invoice(id, status)").order("name"),
+    sb.from("Client").select("*, locations:Location(id, name, address, latitude, active), sops:Sop(id, title), rates:ClientRate(*), invoices:Invoice(id, status)").order("name"),
     sb.from("ServiceType").select("*").eq("active", true).order("sortOrder").order("name"),
   ]);
   const services = must(st, "services") as ServiceType[];
-  const clients = (must(c, "clients") as (Client & { locations: Pick<Location, "id">[]; rates: ClientRate[]; invoices: { id: string; status: string }[] })[])
-    .map((x) => ({ ...x, invoices: x.invoices.filter((i) => i.status === "SENT") }));
+  const clients = (must(c, "clients") as (Client & { locations: Pick<Location, "id" | "name" | "address" | "latitude" | "active">[]; sops: { id: string; title: string }[]; rates: ClientRate[]; invoices: { id: string; status: string }[] })[])
+    .map((x) => ({ ...x, locations: [...x.locations].sort((a, b) => a.name.localeCompare(b.name)), sops: [...x.sops].sort((a, b) => a.title.localeCompare(b.title)), invoices: x.invoices.filter((i) => i.status === "SENT") }));
   return (
     <>
       <PageHeader title="Clients" />

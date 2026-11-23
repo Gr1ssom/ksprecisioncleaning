@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { fromLocalInput } from "@/lib/format";
-import { removeImages, uploadDataUrl } from "@/lib/storage";
+import { removeImages, uploadDataUrl, uploadDoc } from "@/lib/storage";
+import { cleanLink, parseScope, sopFileProblem } from "@/lib/sops";
+import { geocode } from "@/lib/geocode";
 import { audit, diff } from "@/lib/audit";
 import type { Role } from "@/lib/session";
 import { assignableRoles, canManage } from "@/lib/team";
@@ -69,21 +71,40 @@ export async function saveLocation(form: FormData) {
   done(`/locations/${loc.id}`);
 }
 
-export async function saveSop(form: FormData) {
+export async function saveSop(_: unknown, form: FormData): Promise<{ error?: string }> {
   const me = await requireUser("MANAGER");
   const sb = admin();
   const id = s(form, "id");
-  const data = { title: String(form.get("title")), category: s(form, "category") ?? "General", body: String(form.get("body") ?? ""), locationId: s(form, "locationId") };
-  if (id) {
-    const cur = must(await sb.from("Sop").select("version").eq("id", id).single(), "SOP") as { version: number };
+  const title = s(form, "title");
+  if (!title) return { error: "Give the SOP a title." };
+  let linkUrl: string | null;
+  try { linkUrl = cleanLink(s(form, "linkUrl")); }
+  catch { return { error: "That link doesn't look right. Copy the share link from Google Drive and paste it again." }; }
+  const prev = id ? (must(await sb.from("Sop").select("version, filePath, fileName").eq("id", id).single(), "SOP") as { version: number; filePath: string | null; fileName: string | null }) : null;
+  const file = form.get("file");
+  const upload = file instanceof File && file.size > 0 ? file : null;
+  if (upload) { const problem = sopFileProblem(upload); if (problem) return { error: problem }; }
+  const keep = form.get("removeFile") !== "on";
+  let filePath = keep ? prev?.filePath ?? null : null, fileName = keep ? prev?.fileName ?? null : null;
+  const body = String(form.get("body") ?? "").trim();
+  if (!body && !linkUrl && !filePath && !upload) return { error: "Add a Google Drive link, a file or typed steps so there is something to read." };
+  if (upload) {
+    try { filePath = await uploadDoc(upload, "sops"); fileName = upload.name; }
+    catch (e) { return { error: `${(e as Error).message}. Try again, or paste a Google Drive link instead.` }; }
+  }
+  const data = { title, category: s(form, "category") ?? "General", body, linkUrl, filePath, fileName, ...parseScope(s(form, "scope")) };
+  if (id && prev) {
     // A new version asks everyone to read it again.
-    must(await sb.from("Sop").update({ ...data, version: cur.version + 1, updatedAt: new Date().toISOString() }).eq("id", id), "save SOP");
-    await audit(me, "sop.update", "Sop", id, `SOP "${data.title}" saved as version ${cur.version + 1}`);
+    must(await sb.from("Sop").update({ ...data, version: prev.version + 1, updatedAt: new Date().toISOString() }).eq("id", id), "save SOP");
+    await audit(me, "sop.update", "Sop", id, `SOP "${title}" saved as version ${prev.version + 1}`);
+    if (prev.filePath && prev.filePath !== filePath) await removeImages([prev.filePath]);
   } else {
     const row = must(await sb.from("Sop").insert(data).select("id").single(), "add SOP") as { id: string };
-    await audit(me, "sop.create", "Sop", row.id, `Added SOP "${data.title}"`);
+    await audit(me, "sop.create", "Sop", row.id, `Added SOP "${title}"`);
   }
-  done(data.locationId ? `/locations/${data.locationId}` : "/sops");
+  const back = s(form, "back");
+  done(back && back.startsWith("/") && !back.startsWith("//") ? back : "/sops");
+  return {};
 }
 
 // ---------- Floor plans ----------
@@ -251,6 +272,22 @@ export async function saveClient(form: FormData) {
   const ch = diff(byName(before), byName(Object.fromEntries(Object.entries(after).filter(([k, v]) => v !== null || k in before))));
   if (!id) await audit(me, "client.create", "Client", client.id, `Added client ${data.name}`, { after: ch.after });
   else if (ch.after) await audit(me, "client.prices", "Client", client.id, `Changed prices for ${data.name}`, ch);
+  // Locations added on the same form (loc_address / loc_name / loc_notes, one of each per row).
+  const addrs = form.getAll("loc_address").map(String), locNames = form.getAll("loc_name").map(String), locNotes = form.getAll("loc_notes").map(String);
+  const rows = addrs.map((address, i) => ({ address: address.trim(), name: (locNames[i] ?? "").trim(), accessNotes: (locNotes[i] ?? "").trim() || null })).filter((r) => r.address);
+  if (rows.length) {
+    const taken = new Set((must(await sb.from("Location").select("name").eq("clientId", client.id), "locations") as { name: string }[]).map((l) => l.name));
+    // Best effort: a location without coordinates still saves and says so on its page.
+    const spots = await Promise.all(rows.map((r) => geocode(r.address)));
+    for (const [i, r] of rows.entries()) {
+      let name = r.name || data.name;
+      for (let k = 2; taken.has(name); k++) name = `${r.name || data.name} ${k}`;
+      taken.add(name);
+      const loc = { name, address: r.address, accessNotes: r.accessNotes, clientId: client.id, latitude: spots[i].lat ?? null, longitude: spots[i].lng ?? null, geofenceM: 150, active: true };
+      const row = must(await sb.from("Location").insert(loc).select("id").single(), "add location") as { id: string };
+      await audit(me, "location.create", "Location", row.id, `Added location ${name} for ${data.name}${spots[i].lat == null ? " (no map position yet)" : ""}`, { after: loc });
+    }
+  }
   done("/clients");
 }
 

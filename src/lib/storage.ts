@@ -33,3 +33,12 @@ export async function removeImages(paths: (string | null | undefined)[]) {
   const list = paths.filter(Boolean) as string[];
   if (list.length) await admin().storage.from(BUCKET).remove(list);
 }
+
+/** Upload an SOP document (PDF, Office, text or image) to the private media bucket. */
+export async function uploadDoc(file: File, folder: string): Promise<string> {
+  const ext = (/\.([a-z0-9]+)$/i.exec(file.name)?.[1] ?? "bin").toLowerCase();
+  const path = `${folder}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await admin().storage.from(BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+  if (error) throw new Error(`Upload failed: ${error.message}`);
+  return path;
+}

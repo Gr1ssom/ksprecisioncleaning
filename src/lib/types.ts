@@ -17,7 +17,13 @@ export type Location = {
   accessNotes: string | null; active: boolean; clientId: string | null; createdAt: string;
 };
 export type SupplyDepot = { id: string; name: string; address: string; latitude: number | null; longitude: number | null; geofenceM: number };
-export type Sop = { id: string; title: string; category: string; body: string; locationId: string | null; version: number; updatedAt: string };
+export type Sop = {
+  id: string; title: string; category: string; body: string; version: number; updatedAt: string;
+  /** Who it applies to: a location, a client (all its locations), or neither = the whole company. */
+  locationId: string | null; clientId: string | null;
+  /** Optional sources besides typed steps: a web link (Google Drive etc.) and/or an uploaded file. */
+  linkUrl: string | null; filePath: string | null; fileName: string | null;
+};
 export type SopAck = { id: string; sopId: string; userId: string; version: number; ackedAt: string };
 export type ServiceType = { id: string; name: string; sortOrder: number; active: boolean };
 export type ClientRate = { id: string; clientId: string; serviceTypeId: string; price: number };
