@@ -1,19 +1,12 @@
-"use client";
-import { useActionState } from "react";
 import { AuthCard } from "@/components/AuthCard";
-import { setNewPassword } from "../actions/account";
+import { ResetForm } from "./ResetForm";
 
-export default function Reset() {
-  const [state, action, pending] = useActionState(setNewPassword, null);
+export default async function Reset({ searchParams }: { searchParams: Promise<{ first?: string }> }) {
+  const { first } = await searchParams;
   return (
-    <AuthCard heading="New password">
-      <form action={action} className="space-y-4">
-        <input type="hidden" name="from" value="reset" />
-        <div><label className="label" htmlFor="password">New password</label><input className="input" id="password" name="password" type="password" autoComplete="new-password" minLength={8} required /></div>
-        <div><label className="label" htmlFor="again">Type it again</label><input className="input" id="again" name="again" type="password" autoComplete="new-password" minLength={8} required /></div>
-        {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
-        <button className="btn-primary w-full py-2.5 uppercase tracking-[0.15em]" disabled={pending}>{pending ? "Saving…" : "Save password"}</button>
-      </form>
+    <AuthCard heading={first ? "Choose your password" : "New password"}>
+      {first && <p className="text-sm text-slate-600">You signed in with a password someone gave you. Choose your own (8+ characters) to keep going.</p>}
+      <ResetForm />
     </AuthCard>
   );
 }

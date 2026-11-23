@@ -2,7 +2,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { authClient } from "@/lib/supabase/server";
+import { admin, authClient, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 
@@ -33,6 +33,7 @@ export async function setNewPassword(_: R, form: FormData): Promise<R> {
   if (!data.user) return { error: "Your reset link has expired. Ask for a new one." };
   const { error } = await sb.auth.updateUser({ password: pw });
   if (error) return { error: /same/i.test(error.message) ? "That's your current password. Pick a new one." : /aal2|AAL2/.test(error.message) ? "Enter your 2-step code first, then change your password." : `Couldn't change the password: ${error.message}` };
+  must(await admin().from("User").update({ mustChangePassword: false }).eq("id", data.user.id), "save password status");
   await audit({ id: data.user.id }, "account.password", "User", data.user.id, "Changed their own password");
   if (form.get("from") === "reset") redirect("/dashboard");
   return { ok: "Password changed." };

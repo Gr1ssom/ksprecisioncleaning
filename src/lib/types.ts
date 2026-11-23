@@ -5,6 +5,8 @@ import type { Role } from "./session";
 export type Profile = {
   id: string; name: string; email: string; phone: string | null; role: Role; hourlyRate: number;
   waveEmployeeId: string | null; active: boolean; createdAt: string;
+  /** Must choose their own password before using the app (new login or temporary password). */
+  mustChangePassword: boolean;
 };
 export type Client = {
   id: string; name: string; contactName: string | null; email: string | null; phone: string | null;
