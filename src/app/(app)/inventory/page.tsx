@@ -3,6 +3,7 @@ import type { Profile, StockLevel, StockMovement, Supply, SupplyDepot } from "@/
 import { requireUser } from "@/lib/auth";
 import { PageHeader, Stat } from "@/components/ui";
 import { adjustStock, saveDepot, saveSupply } from "@/app/actions/manage";
+import { GeoFields } from "@/components/GeoFields";
 import { fmtDateTime, money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -92,9 +93,7 @@ export default async function Inventory() {
             <summary className="cursor-pointer font-semibold text-brand-600">New pickup location</summary>
             <form action={saveDepot} className="mt-3 grid grid-cols-2 gap-2">
               <input name="name" placeholder="Name" className="input col-span-2" required />
-              <input name="address" placeholder="Address" className="input col-span-2" required />
-              <input name="latitude" type="number" step="any" placeholder="Latitude" className="input" />
-              <input name="longitude" type="number" step="any" placeholder="Longitude" className="input" />
+              <div className="col-span-2"><GeoFields /></div>
               <button className="btn-primary col-span-2">Add</button>
             </form>
           </details>

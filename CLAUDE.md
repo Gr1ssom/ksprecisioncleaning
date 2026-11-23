@@ -17,8 +17,13 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
     staff, `manage.ts` manager/owner, `billing.ts` invoices and Wave). No client-side data fetching.
 - Env: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (sign-in only; RLS blocks
   it from data), `SUPABASE_SECRET_KEY` (server only, never `NEXT_PUBLIC_`), optional `WAVE_*`.
-- Scripts: `npm run dev`, `npm run build`, `npm run lint`, `npm run typecheck`,
-  `npm run create-owner`, `npm run demo:seed` (guarded, see below).
+- Scripts: `npm run dev`, `npm run build`, `npm run lint` (warnings fail), `npm run typecheck`,
+  `npm test` (Vitest, `tests/`), `npm run e2e` (Playwright smoke test against a preview, see
+  `e2e/smoke.mjs`), `npm run create-owner`, `npm run demo:seed` (guarded, see below).
+- CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit tests and build on every PR. Business
+  rules (pay weeks, overtime, geofence, permissions, task filters, dates) get a unit test; keep pure
+  logic in files without `server-only` (e.g. `src/lib/tasks.ts`) or test it through `computePayroll`-style
+  pure functions.
 
 ## Database (Supabase project `zdmgoysqcudbzbkvxmsz`, "KSPC", us-east-2)
 - **RLS is on for every table with no policies, on purpose.** The browser never reads tables
@@ -33,6 +38,9 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
 - Multi-step writes that must be all-or-nothing are Postgres functions called with `.rpc()`
   (`site_check_in`, `site_check_out`, `supply_pickup`, `adjust_stock`, `start_room`). Grant them to
   `service_role` only.
+- Sign-in extras: "Forgot password?" emails a link to `/auth/confirm` → `/reset`; `/account` lets
+  anyone change their password and turn on 2-step sign-in (TOTP). Anyone with a 2-step factor must
+  reach `aal2` (`currentUser()` redirects to `/login/verify`).
 - `"User"` is the staff profile; its `id` is the Supabase Auth user id. Create logins with
   `auth.admin.createUser` (email confirmed), deactivate by banning the login and setting
   `active = false`. The first owner comes from `/setup` (works only while no users exist).
@@ -40,9 +48,16 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   issues resolved. Hard deletes only for things a manager is editing (rooms, room-type tasks).
 - `npm run demo:seed` (needs `ALLOW_DEMO_SEED=1`) loads @ks.test demo logins and data;
   `-- --clear` removes all business data. Both refuse once a real team member exists.
+- Invoice numbers come from the `invoice_number_seq` sequence (column default). Never compute them.
+- **Audit log:** every change to hours, prices, roles/logins, invoices, stock, locations, SOPs or job
+  status calls `audit()` (`src/lib/audit.ts`) with a one-line summary and `diff()` of the changed
+  fields. Never put passwords, codes or keys in it. The owner reads it on the Activity page.
+- Production server errors are written to `AppError` by `src/instrumentation.ts` and shown on
+  Activity (and as a dashboard warning). Don't catch-and-hide errors that should land there.
 - Timezone: `America/Chicago` (`APP_TZ` in `src/lib/format.ts`). Servers run in UTC: filter DATE
   columns with `today(n)`, show times with `fmtTime()`/`fmtDateTime()`, parse inputs with
-  `fromLocalInput()`. Never use `new Date().getDate()`/`getDay()` for business dates.
+  `fromLocalInput()`, local dates with `localDate()`, pay weeks with `payWeek()` (Mon–Sun, Chicago).
+  Never use `new Date().getDate()`/`getDay()` for business dates.
 
 ## Roles
 - `STAFF` < `MANAGER` < `OWNER` (`src/lib/session.ts`). Pages call `requireUser("MANAGER")` etc.;
@@ -64,6 +79,10 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   are stored on the invoice (`waveError`) and shown, never thrown at the user.
 - **Wave Payroll has no public API.** Payroll is a CSV export (`/payroll/export`) of regular and
   overtime hours per employee to enter in Wave. Don't claim it syncs.
+- Geofence coordinates come from the US Census geocoder (`src/app/actions/geocode.ts`, free, no key)
+  or the manager's phone on site (`GeoFields`).
+- Photos go through `PhotoInput` (`src/components/PhotoInput.tsx`), which shrinks them to a
+  ~1600 px JPEG on the phone before upload. Never upload a raw camera file.
 - GPS check-ins use the browser Geolocation API (`src/components/GeoForm.tsx`). A check-in without
   GPS still saves and is flagged; distance is checked against the site's geofence (`src/lib/geo.ts`).
 

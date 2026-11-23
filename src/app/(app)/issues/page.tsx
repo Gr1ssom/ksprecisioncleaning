@@ -4,6 +4,7 @@ import type { Issue, Location, Profile } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { Badge, Empty, PageHeader } from "@/components/ui";
 import { reportIssue } from "@/app/actions/field";
+import { PhotoInput } from "@/components/PhotoInput";
 import { fmtDateTime } from "@/lib/format";
 import { ResolveButton } from "./ResolveButton";
 
@@ -33,7 +34,7 @@ export default async function Issues({ searchParams }: { searchParams: Promise<{
             {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <textarea name="detail" rows={3} className="input" placeholder="Details" />
-          <div><label className="label">Photo</label><input type="file" name="photo" accept="image/*" capture="environment" className="block w-full text-sm text-slate-600 file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-md file:border-0 file:bg-ink file:px-4 file:font-semibold file:text-paper" /></div>
+          <div><span className="label">Photo</span><PhotoInput label="Take or choose a photo" className="btn-secondary" /></div>
           <button className="btn-primary">Submit</button>
         </form>
       </details>

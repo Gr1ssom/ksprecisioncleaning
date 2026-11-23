@@ -14,6 +14,8 @@ export async function login(_: unknown, form: FormData) {
     await sb.auth.signOut();
     return { error: "This login is turned off. Ask the owner to reactivate it." };
   }
+  const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal?.nextLevel === "aal2" && aal.currentLevel !== "aal2") redirect("/login/verify");
   redirect("/dashboard");
 }
 

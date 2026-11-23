@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase/env";
 
-const PUBLIC = ["/login", "/setup"];
+const PUBLIC = ["/login", "/setup", "/forgot", "/auth/confirm"];
 
 /** Keeps the Supabase Auth session fresh and sends signed-out visitors to /login. */
 export async function middleware(req: NextRequest) {
