@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
-import { Camera, CheckCheck, ChevronRight, Play, Square, StickyNote } from "lucide-react";
+import { CheckCheck, ChevronRight, Play, Square, StickyNote } from "lucide-react";
 import { FloorPlan } from "@/components/FloorPlan";
+import { PhotoInput } from "@/components/PhotoInput";
 import { ZoomPan } from "@/components/ZoomPan";
 import { roomIcon } from "@/components/roomIcons";
 import { addRoomPhoto, finishRoom, startRoom, stopRoom, toggleRoomTask } from "@/app/actions/field";
@@ -191,10 +192,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
                         <input type="hidden" name="assignmentId" value={assignmentId} />
                         <input type="hidden" name="roomId" value={room.id} />
                         <input type="hidden" name="kind" value={kind} />
-                        <label className="btn-secondary w-full capitalize">
-                          <Camera className="h-4 w-4" />{kind}
-                          <input type="file" name="photo" accept="image/*" capture="environment" className="hidden" onChange={(e) => e.currentTarget.form?.requestSubmit()} />
-                        </label>
+                        <PhotoInput autoSubmit label={kind === "before" ? "Before" : "After"} />
                       </form>
                     ))}
                   </div>

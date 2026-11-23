@@ -5,6 +5,7 @@ import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { fromLocalInput } from "@/lib/format";
 import { removeImages, uploadDataUrl } from "@/lib/storage";
+import { audit, diff } from "@/lib/audit";
 import type { Role } from "@/lib/session";
 import { assignableRoles, canManage } from "@/lib/team";
 import type { Assignment, Profile, TaskDef } from "@/lib/types";
@@ -44,14 +45,16 @@ export async function saveAssignment(form: FormData) {
 }
 
 export async function setAssignmentStatus(id: string, status: "SCHEDULED" | "CANCELLED" | "MISSED" | "COMPLETED") {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
+  const prev = must(await admin().from("Assignment").select("status, date, location:Location(name)").eq("id", id).single(), "job") as unknown as { status: string; date: string; location: { name: string } };
   must(await admin().from("Assignment").update({ status }).eq("id", id), "update job");
+  await audit(me, "job.status", "Assignment", id, `Job at ${prev.location.name} on ${prev.date}: ${prev.status.toLowerCase()} → ${status.toLowerCase()}`, { before: { status: prev.status }, after: { status } });
   revalidatePath("/", "layout");
 }
 
 // ---------- Locations / SOPs ----------
 export async function saveLocation(form: FormData) {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
   const id = s(form, "id");
   const data = {
     name: String(form.get("name")), address: String(form.get("address")),
@@ -59,12 +62,15 @@ export async function saveLocation(form: FormData) {
     accessNotes: s(form, "accessNotes"), clientId: s(form, "clientId"), active: form.get("active") !== "off",
   };
   const sb = admin();
+  const prev = id ? (must(await sb.from("Location").select("name, address, latitude, longitude, geofenceM, clientId, active").eq("id", id).single(), "location") as Record<string, unknown>) : null;
   const loc = must(id ? await sb.from("Location").update(data).eq("id", id).select("id").single() : await sb.from("Location").insert(data).select("id").single(), "save location") as { id: string };
+  const ch = diff(prev, data);
+  if (!id || ch.after) await audit(me, id ? "location.update" : "location.create", "Location", loc.id, `${id ? "Updated" : "Added"} location ${data.name}${id && ch.after ? ` (${Object.keys(ch.after).join(", ")})` : ""}`, ch);
   done(`/locations/${loc.id}`);
 }
 
 export async function saveSop(form: FormData) {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
   const sb = admin();
   const id = s(form, "id");
   const data = { title: String(form.get("title")), category: s(form, "category") ?? "General", body: String(form.get("body") ?? ""), locationId: s(form, "locationId") };
@@ -72,7 +78,11 @@ export async function saveSop(form: FormData) {
     const cur = must(await sb.from("Sop").select("version").eq("id", id).single(), "SOP") as { version: number };
     // A new version asks everyone to read it again.
     must(await sb.from("Sop").update({ ...data, version: cur.version + 1, updatedAt: new Date().toISOString() }).eq("id", id), "save SOP");
-  } else must(await sb.from("Sop").insert(data), "add SOP");
+    await audit(me, "sop.update", "Sop", id, `SOP "${data.title}" saved as version ${cur.version + 1}`);
+  } else {
+    const row = must(await sb.from("Sop").insert(data).select("id").single(), "add SOP") as { id: string };
+    await audit(me, "sop.create", "Sop", row.id, `Added SOP "${data.title}"`);
+  }
   done(data.locationId ? `/locations/${data.locationId}` : "/sops");
 }
 
@@ -155,9 +165,10 @@ export async function adjustStock(form: FormData) {
   const me = await requireUser("MANAGER");
   const delta = Math.trunc(Number(form.get("delta") || 0));
   if (!delta) return;
-  must(await admin().rpc("adjust_stock", {
-    p_supply: String(form.get("supplyId")), p_depot: String(form.get("depotId")), p_delta: delta, p_reason: String(form.get("reason") || "RESTOCK"), p_user: me.id,
-  }), "adjust stock");
+  const supplyId = String(form.get("supplyId")), depotId = String(form.get("depotId")), reason = String(form.get("reason") || "RESTOCK");
+  must(await admin().rpc("adjust_stock", { p_supply: supplyId, p_depot: depotId, p_delta: delta, p_reason: reason, p_user: me.id }), "adjust stock");
+  const names = await Promise.all([admin().from("Supply").select("name").eq("id", supplyId).single(), admin().from("SupplyDepot").select("name").eq("id", depotId).single()]);
+  await audit(me, "stock.adjust", "Supply", supplyId, `${reason.toLowerCase()} ${delta > 0 ? "+" : ""}${delta} ${names[0].data?.name ?? "supply"} at ${names[1].data?.name ?? "pickup location"}`, { after: { delta, reason, depotId } });
   revalidatePath("/inventory");
 }
 
@@ -179,18 +190,24 @@ export async function saveDepot(form: FormData) {
 
 // ---------- Time ----------
 export async function approveTime(ids: string[]) {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
   must(await admin().from("TimeEntry").update({ approved: true }).in("id", ids), "approve");
+  await audit(me, "time.approve", "TimeEntry", ids.length === 1 ? ids[0] : null, `Approved ${ids.length} time ${ids.length === 1 ? "entry" : "entries"}`, { after: { ids } });
   revalidatePath("/time");
 }
 
 export async function editTime(form: FormData) {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
+  const id = String(form.get("id"));
   const out = s(form, "clockOut");
+  const prev = must(await admin().from("TimeEntry").select("clockIn, clockOut, note, user:User!TimeEntry_userId_fkey(name)").eq("id", id).single(), "time entry") as unknown as { clockIn: string; clockOut: string | null; note: string | null; user: { name: string } };
+  const next = { clockIn: fromLocalInput(String(form.get("clockIn"))).toISOString(), clockOut: out ? fromLocalInput(out).toISOString() : null, note: s(form, "note") };
   // Edited entries need re-approval.
-  must(await admin().from("TimeEntry").update({
-    clockIn: fromLocalInput(String(form.get("clockIn"))).toISOString(), clockOut: out ? fromLocalInput(out).toISOString() : null, note: s(form, "note"), approved: false,
-  }).eq("id", String(form.get("id"))), "save time");
+  must(await admin().from("TimeEntry").update({ ...next, approved: false }).eq("id", id), "save time");
+  // The form edits to the minute, so compare to the minute (no phantom "changed by 53 seconds").
+  const norm = (v: string | null) => (v ? new Date(Math.floor(Date.parse(v) / 60000) * 60000).toISOString() : null);
+  const ch = diff({ clockIn: norm(prev.clockIn), clockOut: norm(prev.clockOut), note: prev.note }, { ...next, clockIn: norm(next.clockIn), clockOut: norm(next.clockOut) });
+  if (ch.after) await audit(me, "time.edit", "TimeEntry", id, `Edited ${prev.user.name}'s hours${next.note ? `: ${next.note}` : ""}`, ch);
   revalidatePath("/time");
 }
 
@@ -209,7 +226,7 @@ export async function postAnnouncement(form: FormData) {
 
 // ---------- Clients ----------
 export async function saveClient(form: FormData) {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
   const sb = admin();
   const id = s(form, "id");
   const data = { name: String(form.get("name")), contactName: s(form, "contactName"), email: s(form, "email"), phone: s(form, "phone"), billingAddress: s(form, "billingAddress"), waveCustomerId: s(form, "waveCustomerId"), notes: s(form, "notes") };
@@ -222,18 +239,31 @@ export async function saveClient(form: FormData) {
     const val = String(v).trim();
     if (val === "") unset.push(k.slice(5)); else set.push({ clientId: client.id, serviceTypeId: k.slice(5), price: Number(val) });
   }
+  const before = Object.fromEntries((must(await sb.from("ClientRate").select("serviceTypeId, price").eq("clientId", client.id), "prices") as { serviceTypeId: string; price: number }[]).map((r) => [r.serviceTypeId, Number(r.price)]));
   if (set.length) must(await sb.from("ClientRate").upsert(set, { onConflict: "clientId,serviceTypeId" }), "save prices");
   if (unset.length) must(await sb.from("ClientRate").delete().eq("clientId", client.id).in("serviceTypeId", unset), "clear prices");
+  const after: Record<string, number | null> = { ...before };
+  for (const r of set) after[r.serviceTypeId] = r.price;
+  for (const u of unset) after[u] = null;
+  // Log prices by service name ("Deep clean: 420 → 450"), not internal ids.
+  const names = Object.fromEntries((must(await sb.from("ServiceType").select("id, name"), "services") as { id: string; name: string }[]).map((t) => [t.id, t.name]));
+  const byName = (o: Record<string, number | null>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [names[k] ?? k, v]));
+  const ch = diff(byName(before), byName(Object.fromEntries(Object.entries(after).filter(([k, v]) => v !== null || k in before))));
+  if (!id) await audit(me, "client.create", "Client", client.id, `Added client ${data.name}`, { after: ch.after });
+  else if (ch.after) await audit(me, "client.prices", "Client", client.id, `Changed prices for ${data.name}`, ch);
   done("/clients");
 }
 
 // ---------- Service types ----------
 export async function saveServiceType(form: FormData) {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
   const sb = admin();
   const id = s(form, "id");
   const name = String(form.get("name")).trim();
-  if (id) must(await sb.from("ServiceType").update({ name, active: form.get("active") !== "off" }).eq("id", id), "save service");
+  if (id) {
+    must(await sb.from("ServiceType").update({ name, active: form.get("active") !== "off" }).eq("id", id), "save service");
+    await audit(me, "service.update", "ServiceType", id, `Service "${name}" ${form.get("active") === "off" ? "retired" : "saved"}`);
+  }
   else {
     const count = (await sb.from("ServiceType").select("id", { count: "exact", head: true })).count ?? 0;
     must(await sb.from("ServiceType").insert({ name, sortOrder: count }), "add service");
@@ -288,6 +318,8 @@ export async function saveUser(_: unknown, form: FormData): Promise<TeamResult> 
     if (error) return { error: `Couldn't update the login: ${error.message}` };
     const up = await sb.from("User").update(profile).eq("id", id);
     if (up.error) return { error: `Couldn't save: ${up.error.message}` };
+    const ch = diff(target as unknown as Record<string, unknown>, profile);
+    if (ch.after || pw) await audit(me, "user.update", "User", id, `Updated ${name}${ch.after ? ` (${Object.keys(ch.after).join(", ")})` : ""}${pw ? "; set a new password" : ""}`, ch);
     revalidatePath("/team", "layout");
     return { ok: "Saved." };
   }
@@ -300,6 +332,7 @@ export async function saveUser(_: unknown, form: FormData): Promise<TeamResult> 
     await sb.auth.admin.deleteUser(data.user.id); // don't leave a login without a profile
     return { error: `Couldn't save the team member: ${ins.error.message}` };
   }
+  await audit(me, "user.create", "User", data.user.id, `Added ${name} as ${role.toLowerCase()}`, { after: profile });
   revalidatePath("/team", "layout");
   redirect(`/team/${data.user.id}?added=1`);
 }
@@ -314,6 +347,7 @@ export async function setUserActive(id: string, active: boolean): Promise<TeamRe
   const { error } = await admin().auth.admin.updateUserById(id, { ban_duration: active ? "none" : "876000h" });
   if (error) return { error: `Couldn't update the login: ${error.message}` };
   must(await admin().from("User").update({ active }).eq("id", id), "save status");
+  await audit(me, active ? "user.activate" : "user.deactivate", "User", id, `${active ? "Turned on" : "Turned off"} ${target.name}'s login`);
   revalidatePath("/team", "layout");
   return { ok: active ? "Login turned back on." : "Login turned off. Their history is kept." };
 }
@@ -327,6 +361,7 @@ export async function resetPassword(id: string): Promise<TeamResult> {
   const temp = `${words[Math.floor(Math.random() * words.length)]}-${crypto.randomUUID().slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`;
   const { error } = await admin().auth.admin.updateUserById(id, { password: temp });
   if (error) return { error: `Couldn't reset the password: ${error.message}` };
+  await audit(me, "user.password_reset", "User", id, `Set a temporary password for ${target.name}`); // never the password itself
   return { ok: "Temporary password set. Give it to them; they can sign in with it right away.", tempPassword: temp };
 }
 
@@ -345,6 +380,7 @@ export async function removeUser(id: string): Promise<TeamResult> {
   await sb.from("SopAck").delete().eq("userId", id);
   await sb.from("Assignment").update({ createdById: null }).eq("createdById", id);
   must(await sb.from("User").delete().eq("id", id), "remove profile");
+  await audit(me, "user.remove", "User", id, `Removed ${target.name} (${target.email}); no work history`, { before: { name: target.name, email: target.email, role: target.role } });
   const { error } = await sb.auth.admin.deleteUser(id);
   if (error) return { error: `Profile removed, but the login couldn't be deleted: ${error.message}` };
   revalidatePath("/team", "layout");

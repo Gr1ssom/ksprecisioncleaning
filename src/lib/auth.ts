@@ -10,6 +10,9 @@ export const currentUser = cache(async (): Promise<Profile | null> => {
   const sb = await authClient();
   const { data } = await sb.auth.getUser(); // verifies the token with Supabase Auth
   if (!data.user) return null;
+  // 2-step sign-in: someone who turned it on must have entered their code this session.
+  const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal?.nextLevel === "aal2" && aal.currentLevel !== "aal2") redirect("/login/verify");
   const { data: profile } = await admin().from("User").select("*").eq("id", data.user.id).maybeSingle();
   return (profile as Profile | null) ?? null;
 });

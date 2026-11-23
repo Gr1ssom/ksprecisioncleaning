@@ -30,7 +30,7 @@ export default async function Invoices() {
             <tbody>
               {invoices.map((i) => (
                 <tr key={i.id} className="hover:bg-slate-50">
-                  <td><Link href={`/invoices/${i.id}`} className="-my-2 inline-flex min-h-11 items-center font-semibold underline underline-offset-2">{i.number}</Link></td>
+                  <td><Link href={`/invoices/${i.id}`} className="-my-2 inline-flex min-h-11 min-w-11 items-center whitespace-nowrap font-semibold underline underline-offset-2">{i.number}</Link></td>
                   <td>{i.client.name}</td><td>{fmtDate(i.issueDate)}</td>
                   <td className={i.status === "SENT" && i.dueDate < now ? "font-semibold text-red-600" : ""}>{fmtDate(i.dueDate)}</td>
                   <td className="text-right tabular-nums">{money(i.total)}</td><td><Badge value={i.status} /></td>

@@ -1,22 +1,13 @@
 import "server-only";
 import { admin, must } from "./supabase/server";
 import { signedUrls } from "./storage";
-import type { Layout, Room, RoomTypeTask, TaskDef } from "./types";
+import type { Layout, Room, RoomTypeTask } from "./types";
+import { appliesTo, normalizeTasks } from "./tasks";
+export { appliesTo, normalizeTasks };
 
 export type RoomTask = { label: string; custom: boolean; minutes: number | null };
 export type PlanRoomFull = { id: string; name: string; type: string; points: number[][]; color: string; notes: string | null; sortOrder: number; tasks: RoomTask[]; estMinutes: number };
 export type PlanLayout = { id: string; name: string; imageUrl: string | null; imagePath: string | null; aspect: number; rooms: PlanRoomFull[] };
-
-/** Does a task apply to this visit? Empty serviceTypeIds = every visit; no service = show all. */
-export const appliesTo = (t: { serviceTypeIds?: string[] | null }, serviceTypeId?: string | null) =>
-  !serviceTypeId || !t.serviceTypeIds?.length || t.serviceTypeIds.includes(serviceTypeId);
-
-export function normalizeTasks(raw: unknown): TaskDef[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((t) => (typeof t === "string" ? { label: t, serviceTypeIds: [], minutes: null } : (t as TaskDef)))
-    .filter((t) => t && t.label?.trim());
-}
 
 /**
  * Floor plans for a location with each room's checklist = common tasks for its type + its own tasks,

@@ -59,3 +59,8 @@ export type Issue = {
   status: "OPEN" | "RESOLVED"; createdAt: string; resolvedAt: string | null;
 };
 export type Announcement = { id: string; title: string; body: string; createdAt: string };
+export type AuditEntry = {
+  id: string; at: string; actorId: string | null; action: string; entity: string; entityId: string | null;
+  summary: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null;
+};
+export type AppError = { id: string; at: string; message: string; digest: string | null; path: string | null; method: string | null; kind: string | null };

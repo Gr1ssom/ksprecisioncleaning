@@ -1,6 +1,6 @@
 import "server-only";
 import { admin, must } from "./supabase/server";
-import { hoursBetween } from "./format";
+import { hoursBetween, payWeek } from "./format";
 import type { Profile, TimeEntry } from "./types";
 
 export type PayrollRow = {
@@ -8,13 +8,20 @@ export type PayrollRow = {
   regular: number; overtime: number; gross: number; entries: number; unapproved: number;
 };
 
-/** Hours per employee in [from, to). Overtime = hours over 40 in any Mon–Sun week. */
+type Entry = TimeEntry & { user: Pick<Profile, "name" | "email" | "waveEmployeeId" | "hourlyRate"> };
+
+/** Hours per employee in [from, to). Overtime = hours over 40 in any Mon–Sun week (Chicago time). */
 export async function payrollFor(from: Date, to: Date, approvedOnly: boolean): Promise<PayrollRow[]> {
   const entries = must(
     await admin().from("TimeEntry").select("*, user:User!TimeEntry_userId_fkey(*)")
       .gte("clockIn", from.toISOString()).lt("clockIn", to.toISOString()).not("clockOut", "is", null).order("clockIn"),
     "time entries",
-  ) as (TimeEntry & { user: Profile })[];
+  ) as Entry[];
+  return computePayroll(entries, approvedOnly);
+}
+
+/** Pure payroll maths (unit-tested): regular vs overtime per pay week, gross at 1.5× overtime. */
+export function computePayroll(entries: Entry[], approvedOnly: boolean): PayrollRow[] {
   const rows = new Map<string, PayrollRow & { weeks: Map<string, number> }>();
   for (const e of entries) {
     const r = rows.get(e.userId) ?? {
@@ -23,12 +30,10 @@ export async function payrollFor(from: Date, to: Date, approvedOnly: boolean): P
     };
     r.entries++;
     if (!e.approved) r.unapproved++;
-    if (approvedOnly && !e.approved) { rows.set(e.userId, r); continue; }
-    const d = new Date(e.clockIn);
-    const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
-    const wk = monday.toISOString().slice(0, 10);
-    r.weeks.set(wk, (r.weeks.get(wk) ?? 0) + hoursBetween(e.clockIn, e.clockOut));
     rows.set(e.userId, r);
+    if (approvedOnly && !e.approved) continue;
+    const wk = payWeek(e.clockIn); // Mon–Sun week in Chicago time
+    r.weeks.set(wk, (r.weeks.get(wk) ?? 0) + hoursBetween(e.clockIn, e.clockOut));
   }
   return [...rows.values()].map(({ weeks, ...r }) => {
     for (const h of weeks.values()) { r.regular += Math.min(h, 40); r.overtime += Math.max(0, h - 40); }
