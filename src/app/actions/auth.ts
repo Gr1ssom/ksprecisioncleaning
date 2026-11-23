@@ -7,6 +7,7 @@ export async function login(_: unknown, form: FormData) {
   const password = String(form.get("password") || "");
   const sb = await authClient();
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error?.code === "user_banned") return { error: "This login is turned off. Ask your manager to turn it back on." };
   if (error || !data.user) return { error: "Wrong email or password. Try again, or ask your manager to reset it." };
   const { data: profile } = await admin().from("User").select("active").eq("id", data.user.id).maybeSingle();
   if (!profile?.active) {
