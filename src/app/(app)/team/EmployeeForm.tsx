@@ -18,6 +18,10 @@ export function EmployeeForm({ emp, roles, showPay, lockRole }: { emp?: Emp; rol
         <div>
           <label className="label" htmlFor="password">{emp ? "New password (optional)" : "Starting password"}</label>
           <input id="password" name="password" type="text" className="input" minLength={8} required={!emp} autoComplete="new-password" placeholder={emp ? "Leave blank to keep" : "8+ characters"} />
+          <label className="mt-1 flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" name="mustChange" defaultChecked className="h-5 w-5" />
+            Make them choose their own at first sign-in
+          </label>
         </div>
       </div>
 

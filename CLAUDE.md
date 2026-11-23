@@ -43,7 +43,8 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   reach `aal2` (`currentUser()` redirects to `/login/verify`).
 - `"User"` is the staff profile; its `id` is the Supabase Auth user id. Create logins with
   `auth.admin.createUser` (email confirmed), deactivate by banning the login and setting
-  `active = false`. The first owner comes from `/setup` (works only while no users exist).
+  `active = false`. A password someone else set (new login, manager-typed or temporary) sets
+  `mustChangePassword`; `currentUser()` then sends them to `/reset?first=1` until they choose their own. The first owner comes from `/setup` (works only while no users exist).
 - **No hard deletes of business records.** Users and locations are deactivated, invoices voided,
   issues resolved. Hard deletes only for things a manager is editing (rooms, room-type tasks).
 - `npm run demo:seed` (needs `ALLOW_DEMO_SEED=1`) loads @ks.test demo logins and data;

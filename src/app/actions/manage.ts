@@ -307,6 +307,8 @@ export async function saveUser(_: unknown, form: FormData): Promise<TeamResult> 
   const profile: Record<string, unknown> = { name, email, phone: s(form, "phone"), role, waveEmployeeId: s(form, "waveEmployeeId") };
   if (me.role === "OWNER" && form.has("hourlyRate")) profile.hourlyRate = n(form, "hourlyRate") ?? 0;
   const pw = s(form, "password");
+  // A password a manager typed is one they know: ask for a new one at next sign-in unless unticked.
+  if (pw) profile.mustChangePassword = form.get("mustChange") === "on";
   if (pw && pw.length < 8) return { error: "Passwords need at least 8 characters." };
 
   if (id) {
@@ -361,8 +363,9 @@ export async function resetPassword(id: string): Promise<TeamResult> {
   const temp = `${words[Math.floor(Math.random() * words.length)]}-${crypto.randomUUID().slice(0, 4)}-${Math.floor(1000 + Math.random() * 9000)}`;
   const { error } = await admin().auth.admin.updateUserById(id, { password: temp });
   if (error) return { error: `Couldn't reset the password: ${error.message}` };
+  must(await admin().from("User").update({ mustChangePassword: true }).eq("id", id), "save password status");
   await audit(me, "user.password_reset", "User", id, `Set a temporary password for ${target.name}`); // never the password itself
-  return { ok: "Temporary password set. Give it to them; they can sign in with it right away.", tempPassword: temp };
+  return { ok: "Temporary password set. Give it to them; they'll choose their own when they sign in.", tempPassword: temp };
 }
 
 /** Remove someone. With work history they're turned off instead (records are kept for payroll). */
