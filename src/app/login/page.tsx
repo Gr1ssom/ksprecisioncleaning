@@ -21,6 +21,7 @@ export default function LoginPage() {
           <input className="input" id="password" name="password" type="password" autoComplete="current-password" required />
         </div>
         {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+        <a href="/forgot" className="-mt-2 flex min-h-11 items-center justify-end text-sm text-slate-500 underline underline-offset-2">Forgot password?</a>
         <button className="btn-primary w-full py-2.5 uppercase tracking-[0.15em]" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</button>
         {process.env.NODE_ENV !== "production" && (
           <p className="text-center text-xs text-slate-400">Demo: owner@ks.test · manager@ks.test · staff@ks.test — password123</p>

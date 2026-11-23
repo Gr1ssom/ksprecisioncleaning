@@ -9,7 +9,7 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewInvoice({ searchParams }: { searchParams: Promise<{ clientId?: string }> }) {
+export default async function NewInvoice({ searchParams }: { searchParams: Promise<{ clientId?: string; error?: string }> }) {
   await requireUser("MANAGER");
   const sp = await searchParams;
   const sb = admin();
@@ -28,6 +28,7 @@ export default async function NewInvoice({ searchParams }: { searchParams: Promi
         <select name="clientId" defaultValue={clientId} className="input w-72">{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <button className="btn-secondary">Load visits</button>
       </form>
+      {sp.error && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{sp.error.slice(0, 200)}</div>}
       {clientId && (
         <form action={createInvoice} className="card max-w-3xl space-y-4">
           <input type="hidden" name="clientId" value={clientId} />

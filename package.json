@@ -1,15 +1,17 @@
 {
   "name": "ks-precision-cleaning",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings 0",
     "create-owner": "tsx scripts/create-owner.ts",
     "typecheck": "tsc --noEmit",
-    "demo:seed": "tsx scripts/demo-seed.ts"
+    "demo:seed": "tsx scripts/demo-seed.ts",
+    "test": "vitest run",
+    "e2e": "node e2e/smoke.mjs"
   },
   "dependencies": {
     "@fontsource/montserrat": "^5.3.0",
@@ -32,6 +34,7 @@
     "eslint-config-next": "15.5.29",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, MapPin, CalendarDays, Building2, BookOpen, TriangleAlert, Clock, Package,
-  BarChart3, Handshake, Receipt, Users, Settings, Wallet, Menu, X, LogOut, type LucideIcon,
+  BarChart3, Handshake, Receipt, Users, Settings, Wallet, Menu, X, LogOut, History, UserCog, type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/lib/session";
 import { Logo } from "./Logo";
@@ -26,6 +26,8 @@ const ITEMS: Item[] = [
   { href: "/team", label: "Team", icon: Users, min: "MANAGER" },
   { href: "/settings", label: "Settings", icon: Settings, min: "MANAGER" },
   { href: "/payroll", label: "Payroll", icon: Wallet, min: "OWNER" },
+  { href: "/activity", label: "Activity", icon: History, min: "OWNER" },
+  { href: "/account", label: "My account", icon: UserCog, min: "STAFF" },
 ];
 const rank = { STAFF: 1, MANAGER: 2, OWNER: 3 } as const;
 

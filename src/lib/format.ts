@@ -48,3 +48,18 @@ export function fromLocalInput(v: string) {
   const wall = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"));
   return new Date(guess - (wall - guess));
 }
+
+/** Business-timezone calendar date ("YYYY-MM-DD") of an instant. */
+export function localDate(when: Date | string) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(when));
+}
+
+/**
+ * Pay week an instant belongs to: the Monday ("YYYY-MM-DD") of its Mon–Sun week in Chicago time.
+ * Weeks end at Sunday midnight Chicago, so a Sunday-evening shift stays in its own week.
+ */
+export function payWeek(when: Date | string) {
+  const d = localDate(when);
+  const dow = new Date(d + "T00:00:00Z").getUTCDay(); // 0 = Sunday of the LOCAL date
+  return isoDay(new Date(Date.parse(d + "T00:00:00Z") - ((dow + 6) % 7) * 86400_000));
+}

@@ -133,6 +133,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
   const sent = invoices.filter((i) => i.status === "SENT");
   const outstanding = { total: sent.reduce((s, i) => s + Number(i.total), 0), count: sent.length };
   const paidMonth = invoices.filter((i) => i.status === "PAID" && i.issueDate >= monthStart).reduce((s, i) => s + Number(i.total), 0);
+  const errorsWeek = owner ? ((await sb.from("AppError").select("id", { count: "exact", head: true }).gte("at", todayUTC(-7).toISOString())).count ?? 0) : 0;
   const unbilled = must(r8, "unbilled") as unknown as { serviceTypeId: string | null; location: { clientId: string | null } }[];
   const monthHours = must(r9, "labor") as unknown as { clockIn: string; clockOut: string; user: Pick<Profile, "hourlyRate"> }[];
   const low = stock.filter((s) => s.quantity <= s.supply.reorderAt);
@@ -157,6 +158,9 @@ async function ManagerDash({ owner }: { owner: boolean }) {
           <Stat label="Ready to bill" value={money(unbilledAmt)} hint={unpriced ? `${unpriced} visit${unpriced === 1 ? " has" : "s have"} no price set` : `${unbilled.length} completed visits`} tone={unpriced ? "amber" : "slate"} href="/invoices/new" />
           <Stat label="Labor this month" value={money(laborMonth)} hint={`${unapproved} entries to approve`} href="/payroll" />
         </div>
+      )}
+      {errorsWeek > 0 && (
+        <Link href="/activity?tab=errors" className="block rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{errorsWeek} app error{errorsWeek === 1 ? "" : "s"} in the last 7 days. See what happened →</Link>
       )}
       {!owner && unapproved > 0 && (
         <Link href="/time" className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><Clock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{unapproved} time entries waiting for approval →</Link>
