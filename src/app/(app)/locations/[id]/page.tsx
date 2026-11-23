@@ -7,7 +7,10 @@ import type { Client, Location, Sop } from "@/lib/types";
 import { requireUser } from "@/lib/auth";
 import { layoutsWithTasks } from "@/lib/rooms";
 import { PageHeader } from "@/components/ui";
-import { createLayout, saveSop } from "@/app/actions/manage";
+import { createLayout } from "@/app/actions/manage";
+import { SopForm } from "@/components/SopForm";
+import { SopContent } from "@/components/SopContent";
+import { signedUrls } from "@/lib/storage";
 import { LocationForm } from "../LocationForm";
 import { PlanPreview } from "./PlanPreview";
 import { roomTimeReport } from "@/lib/reports";
@@ -21,7 +24,10 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
   const sb = admin();
   const loc = must(await sb.from("Location").select("*, client:Client(name), sops:Sop(*)").eq("id", id).maybeSingle(), "location") as (Location & { client: Pick<Client, "name"> | null; sops: Sop[] }) | null;
   if (!loc) notFound();
+  // SOPs for this site, plus the ones written for its client as a whole.
+  if (loc.clientId) loc.sops.push(...(must(await sb.from("Sop").select("*").eq("clientId", loc.clientId), "client SOPs") as Sop[]));
   loc.sops.sort((a, b) => a.title.localeCompare(b.title));
+  const sopFiles = await signedUrls(loc.sops.map((s) => s.filePath));
   const mgr = user.role !== "STAFF";
   const [layouts, clients, report] = await Promise.all([
     layoutsWithTasks(id),
@@ -81,28 +87,23 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
         <div className="space-y-3">
           {loc.sops.map((s) => (
             <details key={s.id} className="card">
-              <summary className="cursor-pointer font-semibold">{s.title} <span className="text-xs font-normal text-slate-500">· {s.category} · v{s.version}</span></summary>
-              <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm">{s.body.split("\n").filter(Boolean).map((l, i) => <li key={i}>{l}</li>)}</ol>
-              {mgr && (
-                <form action={saveSop} className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-                  <input type="hidden" name="id" value={s.id} /><input type="hidden" name="locationId" value={loc.id} />
-                  <div className="grid grid-cols-2 gap-2"><input name="title" defaultValue={s.title} className="input" /><input name="category" defaultValue={s.category} className="input" /></div>
-                  <textarea name="body" defaultValue={s.body} rows={5} className="input" />
-                  <button className="btn-secondary">Save as new version</button>
-                </form>
-              )}
+              <summary className="cursor-pointer font-semibold">{s.title} <span className="text-xs font-normal text-slate-500">· {s.category} · v{s.version}{s.clientId && ` · all ${loc.client?.name ?? "client"} locations`}</span></summary>
+              <SopContent sop={s} fileUrl={s.filePath ? sopFiles[s.filePath] : undefined} />
+              {mgr && (s.clientId
+                ? <Link href={`/sops#${s.id}`} className="mt-2 inline-flex min-h-11 items-center text-sm underline underline-offset-2">Edit on the SOPs page</Link>
+                : (
+                  <details className="mt-3 border-t border-slate-100 pt-2">
+                    <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold">Edit</summary>
+                    <SopForm sop={s} scope={`location:${loc.id}`} back={`/locations/${loc.id}`} />
+                  </details>
+                ))}
             </details>
           ))}
-          {loc.sops.length === 0 && <p className="muted">No location-specific SOPs. Company SOPs still apply.</p>}
+          {loc.sops.length === 0 && <p className="muted">No SOPs for this location or its client. Company SOPs still apply.</p>}
           {mgr && (
             <details className="card">
               <summary className="cursor-pointer font-semibold text-brand-600">Add SOP for this location</summary>
-              <form action={saveSop} className="mt-3 space-y-2">
-                <input type="hidden" name="locationId" value={loc.id} />
-                <div className="grid grid-cols-2 gap-2"><input name="title" placeholder="Title" className="input" required /><input name="category" placeholder="Category" className="input" /></div>
-                <textarea name="body" rows={5} className="input" placeholder="One step per line" required />
-                <button className="btn-primary">Add</button>
-              </form>
+              <SopForm scope={`location:${loc.id}`} back={`/locations/${loc.id}`} />
             </details>
           )}
         </div>

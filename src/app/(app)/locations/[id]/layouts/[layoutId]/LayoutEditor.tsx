@@ -10,6 +10,7 @@ import { ZoomPan, type ZoomPanHandle } from "@/components/ZoomPan";
 import { roomIcon } from "@/components/roomIcons";
 import { deleteLayout, saveLayout, type LayoutInput } from "@/app/actions/manage";
 import type { TaskDef } from "@/lib/types";
+import { taskSuggestions } from "@/lib/tasks";
 
 type ERoom = { id?: string; key: string; name: string; type: string; points: number[][]; color: string; customTasks: TaskDef[]; notes: string | null };
 type Mode = "select" | "polygon" | "rect";
@@ -56,6 +57,7 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks, servi
   const [hover, setHover] = useState<number[] | null>(null);
   const drag = useRef<Drag | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [taskFilter, setTaskFilter] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -247,6 +249,8 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks, servi
     { m: "polygon", label: "Trace", icon: PenLine, hint: "Tap each corner of the room, then tap the first dot (or Finish) to close it. Esc cancels." },
   ];
   const common = selected ? commonTasks[selected.type] ?? [] : [];
+  const suggestions = selected ? taskSuggestions(commonTasks, rooms, selected) : [];
+  const shown = suggestions.filter((t) => t.label.toLowerCase().includes(taskFilter.trim().toLowerCase()));
   const roomMinutes = (r: ERoom) => (commonTasks[r.type] ?? []).filter((t) => !t.serviceTypeIds.length).reduce((s, t) => s + (t.minutes ?? 0), 0) + r.customTasks.filter((t) => !t.serviceTypeIds.length).reduce((s, t) => s + (t.minutes ?? 0), 0);
   const totalMinutes = rooms.reduce((s, r) => s + roomMinutes(r), 0);
   const setTask = (i: number, p: Partial<TaskDef>) => selected && edit(selected.key, { customTasks: selected.customTasks.map((t, j) => (j === i ? { ...t, ...p } : t)) });
@@ -369,7 +373,7 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks, servi
               ) : <p className="text-xs text-slate-500">None for this type yet. Add them in Settings, Room tasks.</p>}
             </div>
             <div>
-              <div className="label">Tasks only this room needs</div>
+              <div className="label">Extra tasks for this room</div>
               <div className="space-y-2">
                 {selected.customTasks.map((t, i) => (
                   <div key={i} className="rounded-lg border border-slate-200 p-2">
@@ -391,9 +395,25 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks, servi
                     </div>
                   </div>
                 ))}
-                <button type="button" className="btn-secondary w-full" onClick={() => patch(selected.key, { customTasks: [...selected.customTasks, { label: "", serviceTypeIds: [], minutes: null }] })}><Plus className="h-4 w-4" />Add task</button>
+                <button type="button" className="btn-secondary w-full" onClick={() => patch(selected.key, { customTasks: [...selected.customTasks, { label: "", serviceTypeIds: [], minutes: null }] })}><Plus className="h-4 w-4" />Type a new task</button>
               </div>
             </div>
+            {suggestions.length > 0 && (
+              <div>
+                <div className="label">Add a common task <span className="normal-case tracking-normal">· tap to add</span></div>
+                {suggestions.length > 8 && <input className="input mb-2" value={taskFilter} onChange={(e) => setTaskFilter(e.target.value)} placeholder="Filter tasks…" aria-label="Filter tasks" />}
+                <div className="flex max-h-56 flex-wrap gap-1.5 overflow-y-auto">
+                  {shown.map((t) => (
+                    <button key={t.label} type="button" title={`From ${t.from}`}
+                      onClick={() => patch(selected.key, { customTasks: [...selected.customTasks, { label: t.label, serviceTypeIds: t.serviceTypeIds, minutes: t.minutes }] })}
+                      className="chip gap-1 border border-slate-300 text-left text-slate-700 hover:border-ink">
+                      <Plus className="h-3.5 w-3.5 shrink-0" />{t.label}{t.minutes ? <span className="text-xs text-slate-400">{t.minutes}m</span> : null}
+                    </button>
+                  ))}
+                  {shown.length === 0 && <p className="text-xs text-slate-500">No common task matches. Type it as a new task above.</p>}
+                </div>
+              </div>
+            )}
             <div><label className="label">Notes for staff</label><input className="input" value={selected.notes ?? ""} onChange={(e) => edit(selected.key, { notes: e.target.value || null })} placeholder="e.g. Don't move papers on the desk" /></div>
             <p className="text-xs text-slate-500">Estimated {roomMinutes(selected) || "—"} min per standard visit.</p>
           </div>
@@ -403,7 +423,7 @@ export function LayoutEditor({ locationId, layout, roomTypes, commonTasks, servi
             <ol className="list-decimal space-y-1 pl-5">
               <li>Upload a photo or sketch of the floor plan, or draw on the grid.</li>
               <li>Draw each room with <b>Rectangle</b> or <b>Trace</b>. Corners snap to rooms you&apos;ve drawn, so shared walls line up.</li>
-              <li>Pick the room type to bring in its common tasks, then add tasks only that room needs.</li>
+              <li>Pick the room type to bring in its common tasks, then tap any other common task to add it, or type one only that room needs.</li>
               <li>Put rooms in cleaning order below. Staff follow that route on the job.</li>
             </ol>
           </div>

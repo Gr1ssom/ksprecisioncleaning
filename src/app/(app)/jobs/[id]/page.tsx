@@ -34,7 +34,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   if (user.role === "STAFF" && a.userId !== user.id && a.userId !== null) notFound();
   const layouts = await layoutsWithTasks(a.locationId, a.serviceTypeId);
   const [companySops, usual, photoUrls] = await Promise.all([
-    sb.from("Sop").select("id, title").is("locationId", null).then((r) => must(r, "SOPs") as Pick<Sop, "id" | "title">[]),
+    // Company-wide SOPs plus the ones for this site's client.
+    sb.from("Sop").select("id, title, clientId").is("locationId", null).then((r) => (must(r, "SOPs") as Pick<Sop, "id" | "title" | "clientId">[]).filter((x) => !x.clientId || x.clientId === raw.location.clientId)),
     usualRoomMinutes(layouts.flatMap((l) => l.rooms.map((r) => r.id))),
     signedUrls(a.roomPhotos.map((p) => p.path)),
   ]);
