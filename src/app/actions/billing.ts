@@ -25,7 +25,7 @@ export async function createInvoice(form: FormData) {
   const unpriced = visits.filter((v) => rate(clientId, v.serviceTypeId) == null);
   if (unpriced.length) {
     const names = [...new Set(unpriced.map((v) => v.serviceType?.name ?? "No service type"))].join(", ");
-    throw new Error(`No price set for: ${names}. Add it on the client, then try again.`);
+    redirect(`/invoices/new?clientId=${clientId}&error=${encodeURIComponent(`No price set for ${names}. Add it on the client, then try again.`)}`);
   }
 
   // One line per location + service type, priced from the client's rate for that service.
@@ -40,7 +40,7 @@ export async function createInvoice(form: FormData) {
   const extraDesc = String(form.get("extraDescription") ?? "").trim();
   const extraAmt = Number(form.get("extraAmount") || 0);
   if (extraDesc && extraAmt) lines.push({ description: extraDesc, quantity: 1, unitPrice: extraAmt });
-  if (!lines.length) throw new Error("Select at least one visit or add a line.");
+  if (!lines.length) redirect(`/invoices/new?clientId=${clientId}&error=${encodeURIComponent("Pick at least one visit, or add an extra line with an amount.")}`);
 
   const terms = Number(form.get("terms") || 15);
   const inv = must(await sb.from("Invoice").insert({
