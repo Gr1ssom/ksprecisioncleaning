@@ -30,7 +30,7 @@ export default async function Payroll({ searchParams }: { searchParams: Promise<
       <form className="mb-4 flex flex-wrap items-end gap-2">
         <div><label className="label">From</label><input type="date" name="from" defaultValue={from} className="input" /></div>
         <div><label className="label">To</label><input type="date" name="to" defaultValue={to} className="input" /></div>
-        <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="all" value="1" defaultChecked={all} /> Include unapproved</label>
+        <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="all" value="1" defaultChecked={all} className="h-5 w-5" /> Include unapproved</label>
         <button className="btn-secondary">Update</button>
       </form>
       {unapproved > 0 && !all && <div className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{unapproved} entries in this period aren&apos;t approved and are left out. Approve them under Hours first.</div>}

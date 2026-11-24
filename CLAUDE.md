@@ -104,8 +104,9 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   payroll and job records stay intact.
 - Navigation lives in `src/lib/nav.ts`. Staff get a short flat list. Managers and the owner get nine
   sidebar entries; related pages share one entry and switch with tabs (`SectionTabs`, rendered by
-  the app layout): Clients | Locations | SOPs, Hours | Payroll, and More (Reports | Activity |
-  Issues | Settings | My account). A new page goes into the section it belongs to, with the lowest
+  the app layout): Clients | Locations | SOPs, Hours | Requests | Time off | Payroll, and More
+  (Reports | Activity | Issues | Alerts | Settings | My account). The bell (unread alerts) sits in
+  the phone top bar and the sidebar footer. A new page goes into the section it belongs to, with the lowest
   role that may see it, and the page itself must call `requireUser` with that same role. Add a new
   top-level entry only when nothing fits.
 
