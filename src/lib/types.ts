@@ -72,3 +72,24 @@ export type AuditEntry = {
   summary: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null;
 };
 export type AppError = { id: string; at: string; message: string; digest: string | null; path: string | null; method: string | null; kind: string | null };
+
+// Phase 2: shift clock, time off, availability, open-shift requests, notifications.
+export type Shift = {
+  id: string; userId: string; clockIn: string; clockOut: string | null; approved: boolean; note: string | null;
+  inLat: number | null; inLng: number | null; outLat: number | null; outLng: number | null;
+};
+export type Break = { id: string; userId: string; shiftId: string | null; startedAt: string; endedAt: string | null };
+export type RequestStatus = "PENDING" | "APPROVED" | "DENIED" | "CANCELLED";
+export type TimeOff = {
+  id: string; userId: string; startDate: string; endDate: string; reason: string | null; status: RequestStatus;
+  decidedById: string | null; decidedAt: string | null; createdAt: string;
+};
+export type AvailabilityRow = { userId: string; weekday: number; available: boolean; startTime: string | null; endTime: string | null };
+export type ShiftClaim = {
+  id: string; assignmentId: string; userId: string; status: RequestStatus; note: string | null;
+  decidedById: string | null; decidedAt: string | null; createdAt: string;
+};
+export type Notification = {
+  id: string; userId: string; kind: string; title: string; body: string | null; url: string | null;
+  dedupe: string | null; createdAt: string; readAt: string | null;
+};

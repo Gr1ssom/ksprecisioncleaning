@@ -1,10 +1,12 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { login } from "../actions/auth";
 import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(login, null);
+  // Forget pages saved for offline use, so the next person on this phone can't open them.
+  useEffect(() => { navigator.serviceWorker?.controller?.postMessage("clear-pages"); }, []);
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-slate-50 p-4">
       <form action={action} className="w-full max-w-md space-y-5 border border-slate-200 bg-surface px-8 pb-8 pt-10 shadow-sm">

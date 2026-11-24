@@ -1,7 +1,9 @@
 import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { PageHeader } from "@/components/ui";
-import { addRoomTypeTask, saveServiceType, updateRoomTypeTask } from "@/app/actions/manage";
+import { addRoomTypeTask, saveRules, saveServiceType, updateRoomTypeTask } from "@/app/actions/manage";
+import { getRules, getSetting } from "@/lib/settings";
+import { headers } from "next/headers";
 import type { RoomTypeTask, ServiceType } from "@/lib/types";
 import { DeleteTask } from "./DeleteTask";
 
@@ -20,8 +22,12 @@ function ServicePicker({ services, selected, name = "serviceTypeIds" }: { servic
   );
 }
 
-export default async function Settings() {
-  await requireUser("MANAGER");
+export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string; error?: string }> }) {
+  const me = await requireUser("MANAGER");
+  const sp = await searchParams;
+  const owner = me.role === "OWNER";
+  const [rules, appUrl, h] = await Promise.all([getRules(), getSetting<string>("appUrl"), headers()]);
+  const here = `https://${h.get("x-forwarded-host") ?? h.get("host")}`;
   const sb = admin();
   const [tr, rr, sr, ar] = await Promise.all([
     sb.from("RoomTypeTask").select("*").order("roomType").order("sortOrder"),
@@ -40,6 +46,57 @@ export default async function Settings() {
   return (
     <>
       <PageHeader title="Settings" />
+      {sp.error && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{sp.error}</div>}
+      {sp.saved === "rules" && <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Pay and alert rules saved.</div>}
+      <section className="mb-8">
+        <h2 className="h2">Pay and alerts</h2>
+        <p className="muted mb-3">How paid hours are counted and who hears about late check-ins.{!owner && " Only the owner can change these."}</p>
+        <form action={saveRules} className="card max-w-2xl space-y-4">
+          <fieldset disabled={!owner} className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="paidDriveTime">Drive time and supply runs</label>
+              <select id="paidDriveTime" name="paidDriveTime" defaultValue={rules.paidDriveTime ? "yes" : "no"} className="input">
+                <option value="yes">Paid (whole day on the clock)</option><option value="no">Not paid (only time at jobs)</option>
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="paidBreaks">Breaks</label>
+              <select id="paidBreaks" name="paidBreaks" defaultValue={rules.paidBreaks ? "yes" : "no"} className="input">
+                <option value="no">Unpaid</option><option value="yes">Paid</option>
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="breakAfterHours">Remind to take a break after (hours, 0 = off)</label>
+              <input id="breakAfterHours" name="breakAfterHours" type="number" min="0" max="12" step="0.5" inputMode="decimal" defaultValue={rules.breakAfterHours} className="input" />
+            </div>
+            <div>
+              <label className="label" htmlFor="overtimeHours">Overtime warning after (hours per week)</label>
+              <input id="overtimeHours" name="overtimeHours" type="number" min="1" max="80" step="1" inputMode="numeric" defaultValue={rules.overtimeHours} className="input" />
+            </div>
+            <div>
+              <label className="label" htmlFor="lateMinutes">&quot;Not checked in&quot; alert after (minutes)</label>
+              <input id="lateMinutes" name="lateMinutes" type="number" min="5" max="120" step="5" inputMode="numeric" defaultValue={rules.lateMinutes} className="input" />
+            </div>
+            <div>
+              <label className="label" htmlFor="lateAlertTo">Who gets that alert</label>
+              <select id="lateAlertTo" name="lateAlertTo" defaultValue={rules.lateAlertTo} className="input">
+                <option value="both">Managers and owners</option><option value="managers">Managers</option><option value="owners">Owners</option>
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="mileageRate">Mileage pay ($ per mile, 0 = miles only)</label>
+              <input id="mileageRate" name="mileageRate" type="number" min="0" max="5" step="0.01" inputMode="decimal" defaultValue={rules.mileageRate} className="input" />
+            </div>
+            <div>
+              <label className="label" htmlFor="appUrl">App address (turns on reminders and late alerts)</label>
+              <input id="appUrl" name="appUrl" type="url" placeholder={here} defaultValue={appUrl ?? ""} className="input" />
+              {!appUrl && <p className="mt-1 text-xs text-slate-500">Use the live address, e.g. {here}. Leave empty on test copies.</p>}
+            </div>
+          </fieldset>
+          <p className="text-xs text-slate-500">Overtime is always paid at 1.5× after 40 hours in a Mon–Sun week; the warning number only changes when you&apos;re warned.</p>
+          {owner && <button className="btn-primary">Save</button>}
+        </form>
+      </section>
       <section className="mb-8">
         <h2 className="h2">Service types</h2>
         <p className="muted mb-3">The kinds of visit you sell. Each client gets its own price per service type on the Clients page.</p>

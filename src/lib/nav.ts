@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, MapPin, CalendarDays, Building2, BookOpen, TriangleAlert, Clock, Package,
-  BarChart3, Handshake, Receipt, Users, Settings, Wallet, History, UserCog, Ellipsis, type LucideIcon,
+  BarChart3, Handshake, Receipt, Users, Settings, Wallet, History, UserCog, Ellipsis, CalendarOff, Inbox, Bell, type LucideIcon,
 } from "lucide-react";
 import { atLeast, type Role } from "./session";
 
@@ -19,15 +19,18 @@ const issues: NavLink = { href: "/issues", label: "Issues", icon: TriangleAlert,
 const hours: NavLink = { href: "/time", label: "Hours", icon: Clock, min: "STAFF" };
 const payroll: NavLink = { href: "/payroll", label: "Payroll", icon: Wallet, min: "OWNER" };
 const account: NavLink = { href: "/account", label: "My account", icon: UserCog, min: "STAFF" };
+const timeoff: NavLink = { href: "/timeoff", label: "Time off", icon: CalendarOff, min: "STAFF" };
+const requests: NavLink = { href: "/requests", label: "Requests", icon: Inbox, min: "MANAGER" };
+const alerts: NavLink = { href: "/notifications", label: "Alerts", icon: Bell, min: "STAFF" };
 
 /** Staff work from a short flat list: the things they do on site. */
-const STAFF: NavItem[] = [dashboard, checkin, jobs, { ...locations, mobile: true }, sops, issues, hours, account];
+const STAFF: NavItem[] = [dashboard, checkin, jobs, { ...locations, mobile: true }, sops, issues, hours, timeoff, alerts, account];
 
 /** Managers and the owner: related pages share one sidebar entry and switch with tabs. */
 const LEAD: NavItem[] = [
   dashboard, checkin, jobs,
   { ...clients, mobile: true, tabs: [clients, locations, sops] },
-  { ...hours, tabs: [hours, payroll] },
+  { ...hours, tabs: [hours, requests, timeoff, payroll] },
   { href: "/invoices", label: "Invoices", icon: Receipt, min: "MANAGER" },
   { href: "/inventory", label: "Inventory", icon: Package, min: "MANAGER" },
   { href: "/team", label: "Team", icon: Users, min: "MANAGER" },
@@ -37,6 +40,7 @@ const LEAD: NavItem[] = [
       { href: "/reports", label: "Reports", icon: BarChart3, min: "MANAGER" },
       { href: "/activity", label: "Activity", icon: History, min: "OWNER" },
       issues,
+      alerts,
       { href: "/settings", label: "Settings", icon: Settings, min: "MANAGER" },
       account,
     ],

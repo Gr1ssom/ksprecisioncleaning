@@ -36,8 +36,8 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   early through the Supabase MCP, rename the file to the version KSPC recorded (`list_migrations`)
   so the integration doesn't run it twice.
 - Multi-step writes that must be all-or-nothing are Postgres functions called with `.rpc()`
-  (`site_check_in`, `site_check_out`, `supply_pickup`, `adjust_stock`, `start_room`). Grant them to
-  `service_role` only.
+  (`site_check_in`, `site_check_out`, `supply_pickup`, `adjust_stock`, `start_room`, `shift_clock`,
+  `shift_break`). Grant them to `service_role` only.
 - Sign-in extras: "Forgot password?" emails a link to `/auth/confirm` → `/reset`; `/account` lets
   anyone change their password and turn on 2-step sign-in (TOTP). Anyone with a 2-step factor must
   reach `aal2` (`currentUser()` redirects to `/login/verify`).
@@ -64,6 +64,33 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
   columns with `today(n)`, show times with `fmtTime()`/`fmtDateTime()`, parse inputs with
   `fromLocalInput()`, local dates with `localDate()`, pay weeks with `payWeek()` (Mon–Sun, Chicago).
   Never use `new Date().getDate()`/`getDay()` for business dates.
+
+## Time, pay and alerts (Phase 2)
+- **Shift clock:** `Shift` is the working day (start/end), `Break` sits inside it. The day starts by
+  itself at the first pickup or site check-in (`ensure_shift`), or with "Start my day". Job time
+  (`TimeEntry`, one per job) sits inside shifts. All clock changes go through the RPCs
+  (`shift_clock`, `shift_break`, `site_check_in/out`, `start_room`, `supply_pickup`), each taking
+  `p_at` (when it happened on the phone).
+- **Paid time** comes only from `paidSpans()` in `src/lib/worktime.ts` (pure, tested): whole shifts
+  (plus job time outside a shift) when drive time is paid, otherwise job time only; unpaid breaks
+  come off; overtime over 40 h per `payWeek`. Payroll, Hours, dashboards all use it. Owner rules
+  live in the `Setting` table, read with `getRules()` (`src/lib/settings.ts`), edited in Settings.
+- **One person per job** (no crews for now). Staff can't check in on an open shift; they ask for it
+  (`ShiftClaim`) and a manager approves. Time off (`TimeOff`) and weekly `Availability` feed
+  `clashes()`, shown to managers on the job page.
+- **Offline:** field actions (check-in/out, ticks, room timers, shift clock, breaks) go through
+  `fieldOp()` (`src/lib/offline.ts`) → `/api/field` → `runFieldOp()` (`src/lib/fieldOps.ts`). Each
+  has an id (`FieldOp` table: applied once) and the phone's time (clamped to 7 days). New field
+  actions must be added there, not as plain server actions. The service worker keeps field pages
+  for offline use and is cleared on the sign-in page.
+- **Notifications:** `notify(userIds, {kind, title, body, url, dedupe})` (`src/lib/notify.ts`) writes
+  the in-app inbox (`/notifications`, the bell) and sends phone push (Web Push; keys made by the app
+  and kept in `AppSecret`, server only). It never throws. Scheduled alerts (reminders 30 min before,
+  "not checked in", 12-hour days) run from `/api/cron`, which `pg_cron` calls every 5 minutes with
+  a key stored only in the database; it does nothing until the owner saves the app address in
+  Settings (so preview databases stay quiet). Use a `dedupe` key for anything that can repeat.
+- Mileage = straight-line miles between a person's check-ins per day (`mileageByDay`), shown on
+  Payroll and in the CSV; say "straight-line", never claim it's driven distance.
 
 ## Roles
 - `STAFF` < `MANAGER` < `OWNER` (`src/lib/session.ts`). Pages call `requireUser("MANAGER")` etc.;

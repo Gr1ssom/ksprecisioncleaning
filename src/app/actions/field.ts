@@ -3,100 +3,64 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
-import { fenceCheck } from "@/lib/geo";
 import { uploadImage } from "@/lib/storage";
-import type { Assignment, Location, SupplyDepot } from "@/lib/types";
+import { FieldError, jobFor, pickup, runFieldOp, type FieldOp } from "@/lib/fieldOps";
+import { leads, notify } from "@/lib/notify";
 
 const num = (v: FormDataEntryValue | null) => (v === null || v === "" ? null : Number(v));
 const geo = (f: FormData) => ({ lat: num(f.get("lat")), lng: num(f.get("lng")), acc: num(f.get("acc")) });
 const str = (f: FormData, k: string) => (String(f.get(k) ?? "").trim() || null);
 
-/** Load a job the current user may work on (staff: only their own or an open shift). */
+const now = () => new Date().toISOString();
+async function op(f: FieldOp) {
+  const user = await requireUser();
+  try {
+    return { user, res: await runFieldOp(user, f, now()) };
+  } catch (e) {
+    if (e instanceof FieldError) return { user, error: e.message };
+    throw e;
+  }
+}
 async function canTouch(assignmentId: string) {
   const user = await requireUser();
-  const a = must(await admin().from("Assignment").select("*, location:Location(*)").eq("id", assignmentId).single(), "job") as Assignment & { location: Location };
-  if (user.role === "STAFF" && a.userId && a.userId !== user.id) throw new Error("This job is assigned to someone else.");
-  return { user, a };
+  return { user, a: await jobFor(user, assignmentId) };
 }
 
 /** Supply pickup check-in: GPS-verified at the depot + decrements stock (one transaction). */
 export async function supplyPickup(form: FormData) {
   const user = await requireUser();
-  const depotId = String(form.get("depotId"));
-  const depot = must(await admin().from("SupplyDepot").select("*").eq("id", depotId).single(), "pickup location") as SupplyDepot;
-  const g = geo(form);
-  const fence = fenceCheck(g, depot);
   const items = [...form.entries()]
     .filter(([k, v]) => k.startsWith("qty_") && Number(v) > 0)
     .map(([k, v]) => ({ supplyId: k.slice(4), qty: Math.floor(Number(v)) }));
-  must(await admin().rpc("supply_pickup", {
-    p_user: user.id, p_depot: depotId, p_lat: g.lat, p_lng: g.lng, p_acc: g.acc,
-    p_distance: fence.distanceM, p_within: fence.withinFence, p_note: str(form, "note"), p_items: items,
-  }), "pickup");
+  const fence = await pickup(user, String(form.get("depotId")), geo(form), str(form, "note"), items);
   revalidatePath("/", "layout");
   redirect(`/checkin?done=pickup&fence=${fence.withinFence ?? "na"}`);
 }
 
 export async function siteCheckIn(form: FormData) {
-  const { user, a } = await canTouch(String(form.get("assignmentId")));
-  const g = geo(form);
-  const fence = fenceCheck(g, a.location);
-  must(await admin().rpc("site_check_in", {
-    p_assignment: a.id, p_user: user.id, p_lat: g.lat, p_lng: g.lng, p_acc: g.acc,
-    p_distance: fence.distanceM, p_within: fence.withinFence, p_note: str(form, "note"),
-  }), "check-in");
+  const id = String(form.get("assignmentId"));
+  const r = await op({ op: "checkIn", assignmentId: id, geo: geo(form), note: str(form, "note") });
   revalidatePath("/", "layout");
-  redirect(`/jobs/${a.id}`);
+  if (r.error) redirect(`/checkin?error=${encodeURIComponent(r.error)}`);
+  redirect(`/jobs/${id}`);
 }
 
 export async function siteCheckOut(form: FormData) {
-  const { user, a } = await canTouch(String(form.get("assignmentId")));
-  const g = geo(form);
-  const fence = fenceCheck(g, a.location);
-  must(await admin().rpc("site_check_out", {
-    p_assignment: a.id, p_user: user.id, p_lat: g.lat, p_lng: g.lng, p_acc: g.acc,
-    p_distance: fence.distanceM, p_within: fence.withinFence, p_note: str(form, "note"),
-  }), "check-out");
+  const id = String(form.get("assignmentId"));
+  const r = await op({ op: "checkOut", assignmentId: id, geo: geo(form), note: str(form, "note") });
   revalidatePath("/", "layout");
-  redirect(`/jobs/${a.id}?done=1`);
+  if (r.error) redirect(`/jobs/${id}?error=${encodeURIComponent(r.error)}`);
+  redirect(`/jobs/${id}?done=1`);
 }
 
-export async function toggleTask(assignmentId: string, index: number) {
-  const { a } = await canTouch(assignmentId);
-  const tasks = a.tasks ?? [];
-  if (tasks[index]) tasks[index].done = !tasks[index].done;
-  must(await admin().from("Assignment").update({ tasks }).eq("id", a.id), "save checklist");
-  revalidatePath(`/jobs/${a.id}`);
-}
-
-/** Start the timer for a room. Only one room runs at a time per person per job. */
-export async function startRoom(assignmentId: string, roomId: string) {
-  const { user, a } = await canTouch(assignmentId);
-  must(await admin().rpc("start_room", { p_assignment: a.id, p_user: user.id, p_room: roomId }), "start room");
-  revalidatePath(`/jobs/${a.id}`);
-}
-
-export async function stopRoom(assignmentId: string) {
-  const { user, a } = await canTouch(assignmentId);
-  must(await admin().rpc("start_room", { p_assignment: a.id, p_user: user.id, p_room: null }), "stop room");
-  revalidatePath(`/jobs/${a.id}`);
-}
-
-export async function toggleRoomTask(assignmentId: string, roomId: string, label: string) {
-  const { user, a } = await canTouch(assignmentId);
-  const sb = admin();
-  const existing = must(await sb.from("RoomTaskCheck").select("id").match({ assignmentId: a.id, roomId, label }).maybeSingle(), "task");
-  if (existing) must(await sb.from("RoomTaskCheck").delete().eq("id", (existing as { id: string }).id), "untick");
-  else must(await sb.from("RoomTaskCheck").insert({ assignmentId: a.id, roomId, label, userId: user.id }), "tick");
-  revalidatePath(`/jobs/${a.id}`);
-}
-
-/** Tick every remaining task in a room at once. */
-export async function finishRoom(assignmentId: string, roomId: string, labels: string[]) {
-  const { user, a } = await canTouch(assignmentId);
-  const rows = labels.map((label) => ({ assignmentId: a.id, roomId, label, userId: user.id }));
-  if (rows.length) must(await admin().from("RoomTaskCheck").upsert(rows, { onConflict: "assignmentId,roomId,label", ignoreDuplicates: true }), "finish room");
-  revalidatePath(`/jobs/${a.id}`);
+/** Start or end the working day (shift clock). Returns an error to show, if any. */
+export async function clockShift(form: FormData) {
+  const on = form.get("on") === "1";
+  const r = await op({ op: "clock", on, geo: geo(form) });
+  revalidatePath("/", "layout");
+  const back = str(form, "back") ?? "/dashboard";
+  if (r.error) redirect(`${back}${back.includes("?") ? "&" : "?"}error=${encodeURIComponent(r.error)}`);
+  redirect(back);
 }
 
 /** Before/after photo for a room on a job (stored in Supabase Storage). */
@@ -115,9 +79,11 @@ export async function reportIssue(form: FormData) {
   const user = await requireUser();
   const photo = form.get("photo");
   const photoPath = photo instanceof File && photo.size > 0 ? await uploadImage(photo, "issues") : null;
+  const title = String(form.get("title"));
   must(await admin().from("Issue").insert({
-    title: String(form.get("title")), detail: str(form, "detail"), locationId: str(form, "locationId"), reportedById: user.id, photoPath,
+    title, detail: str(form, "detail"), locationId: str(form, "locationId"), reportedById: user.id, photoPath,
   }), "report issue");
+  await notify((await leads("both")).filter((id) => id !== user.id), { kind: "issue", title: `New issue: ${title}`, body: `Reported by ${user.name}.`, url: "/issues" });
   revalidatePath("/", "layout");
   redirect(str(form, "back") ?? "/issues");
 }

@@ -3,7 +3,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
-import { fromLocalInput } from "@/lib/format";
+import { fmtDate, fromLocalInput } from "@/lib/format";
+import { notify, notifyLowStock } from "@/lib/notify";
+import { clashesFor } from "@/lib/work";
 import { removeImages, uploadDataUrl, uploadDoc } from "@/lib/storage";
 import { cleanLink, parseScope, sopFileProblem } from "@/lib/sops";
 import { geocode } from "@/lib/geocode";
@@ -11,6 +13,8 @@ import { audit, diff } from "@/lib/audit";
 import type { Role } from "@/lib/session";
 import { assignableRoles, canManage } from "@/lib/team";
 import type { Assignment, Profile, TaskDef } from "@/lib/types";
+import { getRules, setSettings } from "@/lib/settings";
+import type { Rules } from "@/lib/worktime";
 
 const s = (f: FormData, k: string) => (String(f.get(k) ?? "").trim() || null);
 const n = (f: FormData, k: string) => { const v = s(f, k); return v == null ? null : Number(v); };
@@ -34,15 +38,32 @@ export async function saveAssignment(form: FormData) {
   };
   const taskLabels = lines(s(form, "tasks"));
   const repeat = Math.min(Math.max(Number(form.get("repeatWeeks") || 0), 0), 26);
+  const loc = must(await sb.from("Location").select("name").eq("id", data.locationId).single(), "location") as { name: string };
+  const when = `${fmtDate(data.date)} at ${data.startTime}`;
   if (id) {
-    const prev = must(await sb.from("Assignment").select("tasks").eq("id", id).single(), "job") as Pick<Assignment, "tasks">;
+    const prev = must(await sb.from("Assignment").select("tasks, userId, date, startTime, locationId").eq("id", id).single(), "job") as Pick<Assignment, "tasks" | "userId" | "date" | "startTime" | "locationId">;
     const tasks = taskLabels.map((label) => ({ label, done: prev.tasks?.find((t) => t.label === label)?.done ?? false }));
     must(await sb.from("Assignment").update({ ...data, tasks }).eq("id", id), "save job");
+    if (prev.userId !== data.userId) {
+      await notify([data.userId], { kind: "job", title: `New job: ${loc.name}`, body: when, url: `/jobs/${id}` });
+      await notify([prev.userId], { kind: "job", title: `Job moved to someone else: ${loc.name}`, body: `${fmtDate(prev.date)} at ${prev.startTime}`, url: "/jobs" });
+    } else if (prev.date !== data.date || prev.startTime !== data.startTime || prev.locationId !== data.locationId) {
+      await notify([data.userId], { kind: "job", title: `Job changed: ${loc.name}`, body: `Now ${when}.`, url: `/jobs/${id}` });
+    }
     return done(`/jobs/${id}`);
   }
   const tasks = taskLabels.map((label) => ({ label, done: false }));
   const rows = Array.from({ length: repeat + 1 }, (_, w) => ({ ...data, date: addDays(data.date, w * 7), tasks, createdById: me.id }));
-  must(await sb.from("Assignment").insert(rows), "create job");
+  const made = must(await sb.from("Assignment").insert(rows).select("id"), "create job") as { id: string }[];
+  const weekly = rows.length > 1 ? ` (weekly, ${rows.length} visits)` : "";
+  if (data.userId) {
+    await notify([data.userId], { kind: "job", title: `New job: ${loc.name}`, body: when + weekly, url: `/jobs/${made[0].id}` });
+    // Show the first visit if anything clashes (time off, availability, overlap, overtime).
+    if ((await clashesFor({ ...data, id: made[0].id }, data.userId)).length) return done(`/jobs/${made[0].id}`);
+  } else {
+    const staff = must(await sb.from("User").select("id").eq("active", true).eq("role", "STAFF"), "staff") as { id: string }[];
+    await notify(staff.map((u) => u.id), { kind: "open_shift", title: `Open shift: ${loc.name}`, body: `${when}${weekly}. Ask for it if you can take it.`, url: `/jobs/${made[0].id}` });
+  }
   done("/jobs");
 }
 
@@ -50,6 +71,10 @@ export async function setAssignmentStatus(id: string, status: "SCHEDULED" | "CAN
   const me = await requireUser("MANAGER");
   const prev = must(await admin().from("Assignment").select("status, date, location:Location(name)").eq("id", id).single(), "job") as unknown as { status: string; date: string; location: { name: string } };
   must(await admin().from("Assignment").update({ status }).eq("id", id), "update job");
+  if (status === "CANCELLED") {
+    const j = must(await admin().from("Assignment").select("userId, startTime").eq("id", id).single(), "job") as { userId: string | null; startTime: string };
+    await notify([j.userId], { kind: "job", title: `Job cancelled: ${prev.location.name}`, body: `${fmtDate(prev.date)} at ${j.startTime}`, url: `/jobs/${id}` });
+  }
   await audit(me, "job.status", "Assignment", id, `Job at ${prev.location.name} on ${prev.date}: ${prev.status.toLowerCase()} → ${status.toLowerCase()}`, { before: { status: prev.status }, after: { status } });
   revalidatePath("/", "layout");
 }
@@ -188,6 +213,7 @@ export async function adjustStock(form: FormData) {
   if (!delta) return;
   const supplyId = String(form.get("supplyId")), depotId = String(form.get("depotId")), reason = String(form.get("reason") || "RESTOCK");
   must(await admin().rpc("adjust_stock", { p_supply: supplyId, p_depot: depotId, p_delta: delta, p_reason: reason, p_user: me.id }), "adjust stock");
+  if (delta < 0) await notifyLowStock(depotId, [supplyId]);
   const names = await Promise.all([admin().from("Supply").select("name").eq("id", supplyId).single(), admin().from("SupplyDepot").select("name").eq("id", depotId).single()]);
   await audit(me, "stock.adjust", "Supply", supplyId, `${reason.toLowerCase()} ${delta > 0 ? "+" : ""}${delta} ${names[0].data?.name ?? "supply"} at ${names[1].data?.name ?? "pickup location"}`, { after: { delta, reason, depotId } });
   revalidatePath("/inventory");
@@ -210,11 +236,29 @@ export async function saveDepot(form: FormData) {
 }
 
 // ---------- Time ----------
-export async function approveTime(ids: string[]) {
+/** Approve job time entries and/or shift-clock days. */
+export async function approveTime(ids: string[], shiftIds: string[] = []) {
   const me = await requireUser("MANAGER");
-  must(await admin().from("TimeEntry").update({ approved: true }).in("id", ids), "approve");
-  await audit(me, "time.approve", "TimeEntry", ids.length === 1 ? ids[0] : null, `Approved ${ids.length} time ${ids.length === 1 ? "entry" : "entries"}`, { after: { ids } });
-  revalidatePath("/time");
+  if (ids.length) must(await admin().from("TimeEntry").update({ approved: true }).in("id", ids), "approve");
+  if (shiftIds.length) must(await admin().from("Shift").update({ approved: true }).in("id", shiftIds), "approve days");
+  const n = ids.length + shiftIds.length;
+  await audit(me, "time.approve", ids.length ? "TimeEntry" : "Shift", n === 1 ? (ids[0] ?? shiftIds[0]) : null, `Approved ${n} time ${n === 1 ? "entry" : "entries"}`, { after: { ids, shiftIds } });
+  revalidatePath("/", "layout");
+}
+
+/** Edit a shift-clock day (start/end). Edited days need approval again. */
+export async function editShift(form: FormData) {
+  const me = await requireUser("MANAGER");
+  const id = String(form.get("id"));
+  const out = s(form, "clockOut");
+  const prev = must(await admin().from("Shift").select("clockIn, clockOut, note, user:User!Shift_userId_fkey(name)").eq("id", id).single(), "day") as unknown as { clockIn: string; clockOut: string | null; note: string | null; user: { name: string } };
+  const next = { clockIn: fromLocalInput(String(form.get("clockIn"))).toISOString(), clockOut: out ? fromLocalInput(out).toISOString() : null, note: s(form, "note") };
+  if (next.clockOut && next.clockOut < next.clockIn) redirect(`/time?error=${encodeURIComponent("The end of the day can't be before its start.")}`);
+  must(await admin().from("Shift").update({ ...next, approved: false }).eq("id", id), "save day");
+  const norm = (v: string | null) => (v ? new Date(Math.floor(Date.parse(v) / 60000) * 60000).toISOString() : null);
+  const ch = diff({ clockIn: norm(prev.clockIn), clockOut: norm(prev.clockOut), note: prev.note }, { ...next, clockIn: norm(next.clockIn), clockOut: norm(next.clockOut) });
+  if (ch.after) await audit(me, "time.edit", "Shift", id, `Edited ${prev.user.name}'s day${next.note ? `: ${next.note}` : ""}`, ch);
+  revalidatePath("/", "layout");
 }
 
 export async function editTime(form: FormData) {
@@ -425,4 +469,30 @@ export async function removeUser(id: string): Promise<TeamResult> {
   if (error) return { error: `Profile removed, but the login couldn't be deleted: ${error.message}` };
   revalidatePath("/team", "layout");
   redirect("/team?removed=1");
+}
+
+// ---------- Pay rules and alerts (owner) ----------
+export async function saveRules(form: FormData) {
+  const me = await requireUser("OWNER");
+  const before = await getRules();
+  const num = (k: string, min: number, max: number, fallback: number) => {
+    const v = Number(form.get(k));
+    return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  };
+  const to = String(form.get("lateAlertTo"));
+  const next: Rules = {
+    paidDriveTime: form.get("paidDriveTime") === "yes",
+    paidBreaks: form.get("paidBreaks") === "yes",
+    breakAfterHours: num("breakAfterHours", 0, 12, before.breakAfterHours),
+    overtimeHours: num("overtimeHours", 1, 80, before.overtimeHours),
+    lateMinutes: Math.round(num("lateMinutes", 5, 120, before.lateMinutes)),
+    lateAlertTo: to === "managers" || to === "owners" ? to : "both",
+    mileageRate: num("mileageRate", 0, 5, before.mileageRate),
+  };
+  const appUrl = String(form.get("appUrl") ?? "").trim().replace(/\/+$/, "");
+  if (appUrl && !/^https:\/\/[^\s/]+$/.test(appUrl)) redirect(`/settings?error=${encodeURIComponent("The app address must look like https://your-app.vercel.app (no path).")}`);
+  await setSettings({ ...next, appUrl });
+  const ch = diff(before as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
+  if (ch.after) await audit(me, "settings.rules", "Setting", null, `Changed pay and alert rules (${Object.keys(ch.after).join(", ")})`, ch);
+  done("/settings?saved=rules");
 }

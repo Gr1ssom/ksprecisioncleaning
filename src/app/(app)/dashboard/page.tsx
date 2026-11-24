@@ -1,7 +1,12 @@
-import { Clock, MapPin, Megaphone, Package } from "lucide-react";
+import { CalendarClock, Clock, MapPin, Megaphone, Package, TriangleAlert } from "lucide-react";
+import { ShiftCard } from "@/components/ShiftCard";
+import { weekHours, weekOf } from "@/lib/work";
+import { getRules } from "@/lib/settings";
+import { payrollFor } from "@/lib/payroll";
+import { jobHours } from "@/lib/worktime";
 import Link from "next/link";
 import { admin, must } from "@/lib/supabase/server";
-import type { Announcement, Assignment, Checkin, Invoice, Location, Profile, StockLevel, Supply, SupplyDepot, TimeEntry } from "@/lib/types";
+import type { Announcement, Assignment, Checkin, Invoice, Location, Profile, Shift, StockLevel, Supply, SupplyDepot, TimeEntry } from "@/lib/types";
 import { postAnnouncement } from "@/app/actions/manage";
 import { rateBook } from "@/lib/pricing";
 import { requireUser } from "@/lib/auth";
@@ -34,17 +39,18 @@ async function StaffDash({ userId }: { userId: string }) {
     sb.from("Assignment").select(J).eq("userId", userId).eq("date", today()).neq("status", "CANCELLED").order("startTime"),
     sb.from("Assignment").select(J).eq("userId", userId).gt("date", today()).lte("date", today(7)).eq("status", "SCHEDULED").order("date").order("startTime"),
     sb.from("TimeEntry").select("*, assignment:Assignment(location:Location(name))").eq("userId", userId).is("clockOut", null).limit(1).maybeSingle(),
-    sb.from("TimeEntry").select("clockIn, clockOut").eq("userId", userId).gte("clockIn", todayUTC(-((todayUTC().getUTCDay() + 6) % 7)).toISOString()),
+    weekHours([userId]),
     sb.from("Assignment").select(J).is("userId", null).gte("date", today()).eq("status", "SCHEDULED").order("date").limit(3),
   ]);
   const jobs = must(r1, "jobs") as JobRow[];
   const upcoming = must(r2, "upcoming") as JobRow[];
   const active = must(r3, "clock") as (TimeEntry & { assignment: { location: Pick<Location, "name"> } | null }) | null;
-  const weekEntries = must(r4, "hours") as Pick<TimeEntry, "clockIn" | "clockOut">[];
+
   const open = must(r5, "open shifts") as JobRow[];
-  const weekHours = weekEntries.reduce((s, e) => s + hoursBetween(e.clockIn, e.clockOut ?? new Date()), 0);
+  const hoursThisWeek = r4[userId] ?? 0;
   return (
     <div className="space-y-5">
+      <ShiftCard userId={userId} back="/dashboard" />
       {active?.assignment ? (
         <Link href={`/jobs/${active.assignmentId}`} className="block rounded-xl bg-emerald-600 p-4 text-white shadow">
           <div className="text-xs font-semibold uppercase opacity-80">On the clock</div>
@@ -59,7 +65,7 @@ async function StaffDash({ userId }: { userId: string }) {
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Stat label="Jobs today" value={jobs.length} />
-        <Stat label="Hours this week" value={weekHours.toFixed(1)} href="/time" />
+        <Stat label="Hours this week" value={hoursThisWeek.toFixed(1)} href="/time" />
         <Stat label="Next 7 days" value={upcoming.length} hint="scheduled jobs" />
       </div>
       <section>
@@ -75,7 +81,7 @@ async function StaffDash({ userId }: { userId: string }) {
       {open.length > 0 && (
         <section>
           <h2 className="h2 mb-2">Open shifts</h2>
-          <p className="muted mb-2">Ask your manager to pick these up.</p>
+          <p className="muted mb-2">Open one and tap &quot;Ask for this shift&quot;. Your manager approves it.</p>
           <JobList jobs={open} showDate />
         </section>
       )}
@@ -112,7 +118,8 @@ function JobList({ jobs, showDate, showUser }: { jobs: JobRow[]; showDate?: bool
 async function ManagerDash({ owner }: { owner: boolean }) {
   const sb = admin();
   const monthStart = today().slice(0, 8) + "01";
-  const [r1, r2, r3, r4, r5, r6, r7, r8, r9] = await Promise.all([
+  const wk = weekOf();
+  const [r1, r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13, r14] = await Promise.all([
     sb.from("Assignment").select("*, location:Location(name), user:User!Assignment_userId_fkey(name), serviceType:ServiceType(name)").eq("date", today()).neq("status", "CANCELLED").order("startTime"),
     sb.from("TimeEntry").select("*, user:User!TimeEntry_userId_fkey(name), assignment:Assignment(location:Location(name))").is("clockOut", null),
     sb.from("Checkin").select("*, user:User(name), location:Location(name), depot:SupplyDepot(name)").eq("withinFence", false).gte("at", todayUTC(-7).toISOString()).order("at", { ascending: false }).limit(5),
@@ -121,7 +128,11 @@ async function ManagerDash({ owner }: { owner: boolean }) {
     sb.from("TimeEntry").select("id", { count: "exact", head: true }).eq("approved", false).not("clockOut", "is", null),
     sb.from("Invoice").select("status, total, issueDate").in("status", ["SENT", "PAID"]),
     sb.from("Assignment").select("serviceTypeId, location:Location!inner(clientId)").eq("status", "COMPLETED").is("invoiceId", null).not("location.clientId", "is", null),
-    sb.from("TimeEntry").select("clockIn, clockOut, user:User!TimeEntry_userId_fkey(hourlyRate)").gte("clockIn", new Date(monthStart + "T06:00:00Z").toISOString()).not("clockOut", "is", null),
+    sb.from("Shift").select("*, user:User!Shift_userId_fkey(name)").is("clockOut", null),
+    sb.from("TimeOff").select("id", { count: "exact", head: true }).eq("status", "PENDING"),
+    sb.from("ShiftClaim").select("id", { count: "exact", head: true }).eq("status", "PENDING"),
+    sb.from("Shift").select("id", { count: "exact", head: true }).eq("approved", false).not("clockOut", "is", null),
+    sb.from("Assignment").select("userId, date, startTime, endTime").gte("date", today()).lte("date", wk.sunday).eq("status", "SCHEDULED").not("userId", "is", null),
   ]);
   const jobs = must(r1, "jobs") as JobRow[];
   const onClock = must(r2, "on the clock") as (TimeEntry & { user: Pick<Profile, "name">; assignment: { location: Pick<Location, "name"> } | null })[];
@@ -135,19 +146,32 @@ async function ManagerDash({ owner }: { owner: boolean }) {
   const paidMonth = invoices.filter((i) => i.status === "PAID" && i.issueDate >= monthStart).reduce((s, i) => s + Number(i.total), 0);
   const errorsWeek = owner ? ((await sb.from("AppError").select("id", { count: "exact", head: true }).gte("at", todayUTC(-7).toISOString())).count ?? 0) : 0;
   const unbilled = must(r8, "unbilled") as unknown as { serviceTypeId: string | null; location: { clientId: string | null } }[];
-  const monthHours = must(r9, "labor") as unknown as { clockIn: string; clockOut: string; user: Pick<Profile, "hourlyRate"> }[];
+  const shiftsOpen = must(r10, "shifts") as (Shift & { user: Pick<Profile, "name"> })[];
+  const requests = (r11.count ?? 0) + (r12.count ?? 0);
+  const unapprovedAll = unapproved + (r13.count ?? 0);
+  const ahead = must(r14, "upcoming") as { userId: string; date: string; startTime: string; endTime: string | null }[];
+  const rules = await getRules();
+  const team = [...new Set([...shiftsOpen.map((s) => s.userId), ...ahead.map((a) => a.userId), ...onClock.map((e) => e.userId)])];
+  const worked = await weekHours(team);
+  const names = Object.fromEntries([...shiftsOpen.map((s) => [s.userId, s.user.name]), ...onClock.map((e) => [e.userId, e.user.name])]);
+  const nearOT = team.map((id) => ({ id, h: (worked[id] ?? 0) + ahead.filter((a) => a.userId === id).reduce((s, a) => s + jobHours(a), 0) }))
+    .filter((x) => x.h > rules.overtimeHours - 2);
+  if (nearOT.some((x) => !names[x.id])) {
+    const rows = must(await sb.from("User").select("id, name").in("id", nearOT.map((x) => x.id)), "team") as Pick<Profile, "id" | "name">[];
+    for (const r of rows) names[r.id] = r.name;
+  }
   const low = stock.filter((s) => s.quantity <= s.supply.reorderAt);
   const unassigned = jobs.filter((j) => !j.userId).length;
   const rate = await rateBook();
   const unbilledAmt = unbilled.reduce((s, a) => s + (rate(a.location.clientId, a.serviceTypeId) ?? 0), 0);
   const unpriced = unbilled.filter((a) => rate(a.location.clientId, a.serviceTypeId) == null).length;
-  const laborMonth = monthHours.reduce((s, e) => s + hoursBetween(e.clockIn, e.clockOut) * Number(e.user.hourlyRate), 0);
+  const laborMonth = owner ? (await payrollFor(new Date(monthStart + "T06:00:00Z"), new Date(), false)).reduce((s, r) => s + r.gross, 0) : 0;
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Jobs today" value={jobs.length} hint={unassigned ? `${unassigned} unassigned` : "all covered"} tone={unassigned ? "amber" : "slate"} href="/jobs" />
-        <Stat label="On the clock" value={onClock.length} tone="green" />
+        <Stat label="On the clock" value={shiftsOpen.length} hint={`${onClock.length} on site now`} tone="green" href="/time" />
         <Stat label="Open issues" value={issues} tone={issues ? "amber" : "slate"} href="/issues" />
         <Stat label="Low stock" value={low.length} tone={low.length ? "red" : "slate"} href="/inventory" />
       </div>
@@ -156,14 +180,23 @@ async function ManagerDash({ owner }: { owner: boolean }) {
           <Stat label="Outstanding A/R" value={money(outstanding.total)} hint={`${outstanding.count} sent invoices`} tone="blue" href="/invoices" />
           <Stat label="Paid this month" value={money(paidMonth)} tone="green" />
           <Stat label="Ready to bill" value={money(unbilledAmt)} hint={unpriced ? `${unpriced} visit${unpriced === 1 ? " has" : "s have"} no price set` : `${unbilled.length} completed visits`} tone={unpriced ? "amber" : "slate"} href="/invoices/new" />
-          <Stat label="Labor this month" value={money(laborMonth)} hint={`${unapproved} entries to approve`} href="/payroll" />
+          <Stat label="Labor this month" value={money(laborMonth)} hint={`${unapprovedAll} entries to approve`} href="/payroll" />
         </div>
       )}
       {errorsWeek > 0 && (
         <Link href="/activity?tab=errors" className="block rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{errorsWeek} app error{errorsWeek === 1 ? "" : "s"} in the last 7 days. See what happened →</Link>
       )}
-      {!owner && unapproved > 0 && (
-        <Link href="/time" className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><Clock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{unapproved} time entries waiting for approval →</Link>
+      {!owner && unapprovedAll > 0 && (
+        <Link href="/time" className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><Clock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{unapprovedAll} time entries waiting for approval →</Link>
+      )}
+      {requests > 0 && (
+        <Link href="/requests" className="block rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><CalendarClock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{requests} request{requests === 1 ? "" : "s"} for time off or open shifts to decide →</Link>
+      )}
+      {nearOT.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <TriangleAlert className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />Near overtime this week (worked + scheduled):{" "}
+          {nearOT.map((x) => `${names[x.id] ?? "Someone"} ${x.h.toFixed(1)} h`).join(", ")}. Overtime starts after {rules.overtimeHours} h.
+        </div>
       )}
 
       <div className="grid gap-5 lg:grid-cols-2">
@@ -173,7 +206,17 @@ async function ManagerDash({ owner }: { owner: boolean }) {
         </section>
         <section className="space-y-5">
           <div>
-            <h2 className="h2 mb-2">Live on site</h2>
+            <h2 className="h2 mb-2">On the clock</h2>
+            {shiftsOpen.filter((s) => !onClock.some((e) => e.userId === s.userId)).length > 0 && (
+              <div className="card mb-2 divide-y divide-slate-100 p-0">
+                {shiftsOpen.filter((s) => !onClock.some((e) => e.userId === s.userId)).map((s) => (
+                  <div key={s.id} className="flex justify-between p-3 text-sm">
+                    <span><span className="font-medium">{s.user.name}</span> · between jobs</span>
+                    <span className="text-slate-500">since {fmtTime(s.clockIn)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {onClock.length ? (
               <div className="card divide-y divide-slate-100 p-0">
                 {onClock.map((e) => (
@@ -183,7 +226,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
                   </Link>
                 ))}
               </div>
-            ) : <Empty>Nobody is checked in right now.</Empty>}
+            ) : <Empty>Nobody is checked in at a job right now.</Empty>}
           </div>
           <div>
             <h2 className="h2 mb-2">Check-ins off site (7 days)</h2>
