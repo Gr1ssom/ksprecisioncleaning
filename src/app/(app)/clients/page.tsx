@@ -7,12 +7,15 @@ import { money } from "@/lib/format";
 import Link from "next/link";
 import { BookOpen, MapPin } from "lucide-react";
 import { NewLocations } from "./NewLocations";
+import { ShareLink } from "@/components/ShareLink";
+import { baseUrl, emailConfigured } from "@/lib/email";
+import { emailPortalLink, rotatePortalToken } from "@/app/actions/quality";
 
 export const dynamic = "force-dynamic";
 
 type Svc = { id: string; name: string };
 type Loc = { id: string; name: string; address: string; latitude: number | null; active: boolean };
-type C = { locations?: Loc[]; sops?: { id: string; title: string }[]; rates?: { serviceTypeId: string; price: unknown }[]; id?: string; name?: string; contactName?: string | null; email?: string | null; phone?: string | null; billingAddress?: string | null; waveCustomerId?: string | null; notes?: string | null };
+type C = { reportsEnabled?: boolean; reportEmail?: string | null; locations?: Loc[]; sops?: { id: string; title: string }[]; rates?: { serviceTypeId: string; price: unknown }[]; id?: string; name?: string; contactName?: string | null; email?: string | null; phone?: string | null; billingAddress?: string | null; waveCustomerId?: string | null; notes?: string | null };
 function ClientFields({ c, services }: { c?: C; services: Svc[] }) {
   return (
     <form action={saveClient} className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -24,6 +27,14 @@ function ClientFields({ c, services }: { c?: C; services: Svc[] }) {
       <input name="billingAddress" defaultValue={c?.billingAddress ?? ""} placeholder="Billing address" className="input sm:col-span-2" />
       <input name="waveCustomerId" defaultValue={c?.waveCustomerId ?? ""} placeholder="Wave customer ID (blank = created on first send)" className="input sm:col-span-2" />
       <textarea name="notes" defaultValue={c?.notes ?? ""} placeholder="Notes" className="input sm:col-span-2" rows={2} />
+      <fieldset className="space-y-2 sm:col-span-2">
+        <legend className="label">Visit reports</legend>
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" name="reportsEnabled" defaultChecked={c?.reportsEnabled ?? false} />
+          Send a visit report after each check-out (rooms done, photos, time by room, cleaner&apos;s note)
+        </label>
+        <input name="reportEmail" type="email" defaultValue={c?.reportEmail ?? ""} placeholder="Report email (blank = billing email)" className="input" />
+      </fieldset>
       <fieldset className="sm:col-span-2">
         <legend className="label">Price per visit</legend>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -76,8 +87,9 @@ function ClientFields({ c, services }: { c?: C; services: Svc[] }) {
 }
 
 export default async function Clients() {
-  await requireUser("MANAGER");
+  const me = await requireUser("MANAGER");
   const sb = admin();
+  const base = await baseUrl();
   const [c, st] = await Promise.all([
     sb.from("Client").select("*, locations:Location(id, name, address, latitude, active), sops:Sop(id, title), rates:ClientRate(*), invoices:Invoice(id, status)").order("name"),
     sb.from("ServiceType").select("*").eq("active", true).order("sortOrder").order("name"),
@@ -104,10 +116,26 @@ export default async function Clients() {
               <span className="flex gap-2 text-xs">
                 <span className="badge bg-slate-100 text-slate-700">{c.locations.length} location{c.locations.length === 1 ? "" : "s"}</span>
                 {c.invoices.length > 0 && <span className="badge bg-blue-100 text-blue-700">{c.invoices.length} unpaid</span>}
+                {c.reportsEnabled && <span className="badge bg-emerald-100 text-emerald-700">reports on</span>}
                 {c.waveCustomerId ? <span className="badge bg-emerald-100 text-emerald-700">linked to Wave</span> : <span className="badge bg-slate-100 text-slate-500">not in Wave yet</span>}
               </span>
             </summary>
             <ClientFields c={c} services={services} />
+            <div className="mt-4 border-t border-slate-200 pt-3">
+              <div className="label">Client portal</div>
+              <p className="mb-2 text-sm text-slate-600">A read-only link for {c.name}: upcoming visits, visit reports and invoices. No password, so share it only with the client.</p>
+              <ShareLink url={`${base}/c/${c.portalToken}`} text={`Your visits and invoices with KS Precision Cleaning:`}
+                emailReady={emailConfigured() && !!(c.reportEmail || c.email)} email={emailPortalLink.bind(null, c.id)} />
+              {me.role === "OWNER" && (
+                <details className="mt-2">
+                  <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold">Make a new link</summary>
+                  <form action={rotatePortalToken.bind(null, c.id)} className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-slate-600">The old link stops working at once.</span>
+                    <button className="btn-danger">Make new link</button>
+                  </form>
+                </details>
+              )}
+            </div>
           </details>
         ))}
         <details className="card"><summary className="cursor-pointer font-semibold text-brand-600">New client</summary><ClientFields services={services} /></details>

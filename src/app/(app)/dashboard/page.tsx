@@ -129,7 +129,7 @@ async function ManagerDash({ owner }: { owner: boolean }) {
     sb.from("StockLevel").select("*, supply:Supply(name, reorderAt), depot:SupplyDepot(name)"),
     sb.from("TimeEntry").select("id", { count: "exact", head: true }).eq("approved", false).not("clockOut", "is", null),
     sb.from("Invoice").select("status, total, issueDate").in("status", ["SENT", "PAID"]),
-    sb.from("Assignment").select("serviceTypeId, location:Location!inner(clientId)").eq("status", "COMPLETED").is("invoiceId", null).not("location.clientId", "is", null),
+    sb.from("Assignment").select("serviceTypeId, location:Location!inner(clientId)").eq("status", "COMPLETED").is("invoiceId", null).eq("noCharge", false).not("location.clientId", "is", null),
     sb.from("Shift").select("*, user:User!Shift_userId_fkey(name)").is("clockOut", null),
     sb.from("TimeOff").select("id", { count: "exact", head: true }).eq("status", "PENDING"),
     sb.from("ShiftClaim").select("id", { count: "exact", head: true }).eq("status", "PENDING"),

@@ -3,7 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 import { admin, must } from "@/lib/supabase/server";
 import { leads, notify } from "@/lib/notify";
 import { getRules } from "@/lib/settings";
-import { fromLocalInput, today } from "@/lib/format";
+import { fromLocalInput, localDate, today } from "@/lib/format";
+import { createMonthlyDrafts, syncWavePaid } from "@/lib/billingRun";
 import type { Assignment, Shift } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
 /**
  * Called by the database every 5 minutes (pg_cron, see the Phase 2 migration) with a key only the
  * database and this server know. Sends reminders before jobs and "not checked in" alerts. Each
- * alert has a dedupe key, so running again never repeats one.
+ * alert has a dedupe key, so running again never repeats one. Also makes the monthly draft
+ * invoices on the 1st and checks Wave for paid invoices about once an hour.
  */
 export async function POST(req: Request) {
   const sb = admin();
@@ -52,5 +54,18 @@ export async function POST(req: Request) {
     long++;
     await notify([s.userId], { kind: "long_shift", title: "Still working?", body: "You've been on the clock for 12+ hours. End your day if you're done.", url: "/dashboard", dedupe: `long:${s.id}` });
   }
-  return NextResponse.json({ ok: true, reminders, late, long });
+  // Month start (Chicago): draft invoices for last month's visits, once (the run is claimed per month).
+  // About once an hour: mark sent invoices paid when Wave says so (skipped without Wave).
+  const errors: string[] = [];
+  let drafts: unknown = null, wave: unknown = null;
+  const day = localDate(new Date(now));
+  if (day.endsWith("-01")) {
+    try { drafts = await createMonthlyDrafts(null, { claim: true, day }); } catch (e) { errors.push(`Monthly draft invoices failed: ${(e as Error).message}`); }
+  }
+  if (new Date(now).getUTCMinutes() < 5) {
+    try { wave = await syncWavePaid(null); } catch (e) { errors.push(`Checking Wave for paid invoices failed: ${(e as Error).message}`); }
+  }
+  // Thrown after the alerts went out, so the error lands on Activity without blocking them.
+  if (errors.length) throw new Error(errors.join(" "));
+  return NextResponse.json({ ok: true, reminders, late, long, drafts, wave });
 }

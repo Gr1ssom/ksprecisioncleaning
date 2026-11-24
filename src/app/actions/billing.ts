@@ -3,7 +3,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { admin, must } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
-import { fmtDate, lineTotal, money, today, type Line } from "@/lib/format";
+import { lineTotal, money, today } from "@/lib/format";
+import { invoiceLines } from "@/lib/billing";
 import { rateBook } from "@/lib/pricing";
 import { audit } from "@/lib/audit";
 import { ensureWaveCustomer, sendWaveInvoice, waveConfigured } from "@/lib/wave";
@@ -19,37 +20,30 @@ export async function createInvoice(form: FormData) {
   const ids = form.getAll("assignmentId").map(String);
   const visits = (ids.length
     ? must(await sb.from("Assignment").select("*, location:Location!inner(*), serviceType:ServiceType(*)")
-        .in("id", ids).is("invoiceId", null).eq("location.clientId", clientId).order("date"), "visits")
+        .in("id", ids).is("invoiceId", null).eq("noCharge", false).eq("location.clientId", clientId).order("date"), "visits")
     : []) as Visit[];
   const rate = await rateBook();
-  const unpriced = visits.filter((v) => rate(clientId, v.serviceTypeId) == null);
+  // One line per location + service type, priced from the client's rate for that service.
+  const { lines, unpriced } = invoiceLines(visits, (svc) => rate(clientId, svc));
   if (unpriced.length) {
     const names = [...new Set(unpriced.map((v) => v.serviceType?.name ?? "No service type"))].join(", ");
     redirect(`/invoices/new?clientId=${clientId}&error=${encodeURIComponent(`No price set for ${names}. Add it on the client, then try again.`)}`);
   }
-
-  // One line per location + service type, priced from the client's rate for that service.
-  const groups = new Map<string, { label: string; rate: number; dates: string[] }>();
-  for (const v of visits) {
-    const key = `${v.locationId}|${v.serviceTypeId}`;
-    const e = groups.get(key) ?? { label: `${v.serviceType!.name} – ${v.location.name}`, rate: rate(clientId, v.serviceTypeId)!, dates: [] };
-    e.dates.push(fmtDate(v.date).replace(/, \d{4}$/, ""));
-    groups.set(key, e);
-  }
-  const lines: Line[] = [...groups.values()].map((e) => ({ description: `${e.label} (${e.dates.join(", ")})`, quantity: e.dates.length, unitPrice: e.rate }));
   const extraDesc = String(form.get("extraDescription") ?? "").trim();
   const extraAmt = Number(form.get("extraAmount") || 0);
   if (extraDesc && extraAmt) lines.push({ description: extraDesc, quantity: 1, unitPrice: extraAmt });
   if (!lines.length) redirect(`/invoices/new?clientId=${clientId}&error=${encodeURIComponent("Pick at least one visit, or add an extra line with an amount.")}`);
 
   const terms = Number(form.get("terms") || 15);
-  const inv = must(await sb.from("Invoice").insert({
-    // "number" is left out: the database sequence assigns KS-1001, KS-1002…
-    clientId, issueDate: today(), dueDate: today(terms), lines, total: lineTotal(lines),
-    memo: String(form.get("memo") ?? "").trim() || null,
-  }).select("id, number, total").single(), "create invoice") as { id: string; number: string; total: number };
-  await audit(me, "invoice.create", "Invoice", inv.id, `Created ${inv.number} for ${money(inv.total)} (${visits.length} visits)`, { after: { total: inv.total, visits: visits.length } });
-  if (visits.length) must(await sb.from("Assignment").update({ invoiceId: inv.id }).in("id", visits.map((v) => v.id)), "link visits");
+  // One step in the database: the invoice (numbered by its sequence) and its visits linked together.
+  const res = await sb.rpc("bill_visits", {
+    p_client: clientId, p_visits: visits.map((v) => v.id), p_lines: lines, p_total: lineTotal(lines),
+    p_issue: today(), p_due: today(terms), p_memo: String(form.get("memo") ?? "").trim() || null,
+  });
+  if (res.error?.message.includes("just billed")) redirect(`/invoices/new?clientId=${clientId}&error=${encodeURIComponent("Some of these visits were just billed. Check them again, then create the invoice.")}`);
+  const inv = (must(res, "create invoice") as { id: string; number: string }[])[0];
+  const total = lineTotal(lines);
+  await audit(me, "invoice.create", "Invoice", inv.id, `Created ${inv.number} for ${money(total)} (${visits.length} visits)`, { after: { total, visits: visits.length } });
   revalidatePath("/invoices");
   redirect(`/invoices/${inv.id}`);
 }

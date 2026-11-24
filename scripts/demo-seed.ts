@@ -32,7 +32,7 @@ async function q<T>(p: PromiseLike<{ data: T | null; error: { message: string } 
   return data as T;
 }
 
-const DATA_TABLES = ["RoomPhoto", "RoomTaskCheck", "RoomSession", "SopAck", "Checkin", "TimeEntry", "StockMovement", "StockLevel",
+const DATA_TABLES = ["VisitFeedback", "VisitReport", "InspectionRoom", "Inspection", "RoomPhoto", "RoomTaskCheck", "RoomSession", "SopAck", "Checkin", "TimeEntry", "StockMovement", "StockLevel",
   "Assignment", "Invoice", "Issue", "Room", "Layout", "ClientRate", "Sop", "Location", "Client", "Supply", "SupplyDepot", "Announcement", "User"];
 
 async function guard() {
@@ -44,6 +44,7 @@ async function guard() {
 
 async function clear() {
   for (const t of DATA_TABLES) await q(sb.from(t).delete().not("id", "is", null), `clear ${t}`);
+  await q(sb.from("BillingRun").delete().not("month", "is", null), "clear BillingRun");
   const { data } = await sb.auth.admin.listUsers({ perPage: 1000 });
   for (const u of data?.users ?? []) if (u.email?.endsWith("@ks.test")) await sb.auth.admin.deleteUser(u.id);
   const files = await sb.storage.from("media").list("", { limit: 1000 });

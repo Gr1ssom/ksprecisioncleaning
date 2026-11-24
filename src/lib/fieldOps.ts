@@ -2,6 +2,7 @@ import "server-only";
 import { admin, must } from "./supabase/server";
 import { fenceCheck } from "./geo";
 import { notifyLowStock } from "./notify";
+import { afterCheckOut } from "./clientReports";
 import type { Profile } from "./types";
 import type { Assignment, Location, SupplyDepot } from "./types";
 
@@ -57,6 +58,8 @@ export async function runFieldOp(user: Profile, f: FieldOp, atIso: string) {
         p_assignment: a.id, p_user: user.id, p_lat: f.geo.lat, p_lng: f.geo.lng, p_acc: f.geo.acc,
         p_distance: fence.distanceM, p_within: fence.withinFence, p_note: f.note ?? null, p_at: atIso,
       }), f.op === "checkIn" ? "check-in" : "check-out");
+      // Client visit report (if the client gets them). Never fails the check-out.
+      if (f.op === "checkOut") await afterCheckOut(a.id);
       return { assignmentId: a.id, withinFence: fence.withinFence };
     }
     case "startRoom":

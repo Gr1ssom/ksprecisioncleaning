@@ -15,10 +15,14 @@ import { LocationForm } from "../LocationForm";
 import { PlanPreview } from "./PlanPreview";
 import { roomTimeReport } from "@/lib/reports";
 import { RoomTimeTable } from "@/components/RoomTimeTable";
+import { serviceTypes } from "@/lib/pricing";
+import { parseTemplate } from "@/lib/templates";
+import { saveJobTemplate } from "@/app/actions/quality";
 
 export const dynamic = "force-dynamic";
 
-export default async function LocationPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function LocationPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string }> }) {
+  const sp = await searchParams;
   const user = await requireUser();
   const { id } = await params;
   const sb = admin();
@@ -29,11 +33,14 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
   loc.sops.sort((a, b) => a.title.localeCompare(b.title));
   const sopFiles = await signedUrls(loc.sops.map((s) => s.filePath));
   const mgr = user.role !== "STAFF";
-  const [layouts, clients, report] = await Promise.all([
+  const [layouts, clients, report, services, staff] = await Promise.all([
     layoutsWithTasks(id),
     mgr ? (must(await sb.from("Client").select("id, name").order("name"), "clients") as Pick<Client, "id" | "name">[]) : [],
     mgr ? roomTimeReport(id, 90) : null,
+    mgr ? serviceTypes() : [],
+    mgr ? (must(await sb.from("User").select("id, name").eq("active", true).order("name"), "team") as { id: string; name: string }[]) : [],
   ]);
+  const tpl = parseTemplate(loc.jobTemplate);
 
   return (
     <>
@@ -108,6 +115,34 @@ export default async function LocationPage({ params }: { params: Promise<{ id: s
           )}
         </div>
       </section>
+
+      {mgr && (
+        <section className="mb-6">
+          <h2 className="h2">Job template</h2>
+          <p className="muted mb-2">New jobs here start with these. Room tasks still come from the floor plan.</p>
+          {sp.saved === "template" && <div className="mb-3 max-w-2xl rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Template saved. New jobs here fill in from it.</div>}
+          <form action={saveJobTemplate} className="card max-w-2xl space-y-3">
+            <input type="hidden" name="locationId" value={loc.id} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm"><span className="label">Service</span>
+                <select name="serviceTypeId" defaultValue={tpl?.serviceTypeId ?? ""} className="input"><option value="">No default</option>{services.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+              </label>
+              <label className="text-sm"><span className="label">Usual cleaner</span>
+                <select name="userId" defaultValue={tpl?.userId ?? ""} className="input"><option value="">No default</option>{staff.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-sm"><span className="label">Usual start</span><input type="time" name="startTime" defaultValue={tpl?.startTime ?? ""} className="input" /></label>
+                <label className="text-sm"><span className="label">Usual end</span><input type="time" name="endTime" defaultValue={tpl?.endTime ?? ""} className="input" /></label>
+              </div>
+            </div>
+            <label className="block text-sm"><span className="label">Standard job checklist (one per line)</span>
+              <textarea name="tasks" rows={3} defaultValue={(tpl?.tasks ?? []).join("\n")} className="input" placeholder={"Empty all bins\nLock the back door"} />
+            </label>
+            <label className="block text-sm"><span className="label">Job notes</span><textarea name="notes" rows={2} defaultValue={tpl?.notes ?? ""} className="input" /></label>
+            <button className="btn-primary">Save</button>
+          </form>
+        </section>
+      )}
 
       {mgr && (
         <details className="card max-w-2xl">
