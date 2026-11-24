@@ -11,14 +11,16 @@ export function BreakButton({ onBreak }: { onBreak: boolean }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
-  const toggle = () => start(async () => {
+  const toggle = () => {
     const next = !on;
-    setOn(next);
-    const r = await fieldOp({ op: "break", on: next });
-    if ("error" in r) { setOn(!next); setMsg(r.error); }
-    else setMsg("queued" in r ? "No signal: saved on your phone." : null);
-    if (!("queued" in r)) router.refresh();
-  });
+    setOn(next); // shows at once
+    start(async () => {
+      const r = await fieldOp({ op: "break", on: next });
+      if ("error" in r) { setOn(!next); setMsg(r.error); }
+      else setMsg("queued" in r ? "No signal: saved on your phone." : null);
+      if (!("queued" in r)) router.refresh();
+    });
+  };
   return (
     <div>
       <button type="button" onClick={toggle} disabled={pending} className={`${on ? "btn-success" : "btn-secondary"} w-full`}>

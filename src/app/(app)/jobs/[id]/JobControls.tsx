@@ -13,12 +13,15 @@ export function TaskList({ id, tasks, canWork: serverCanWork, canStart = false }
   const router = useRouter();
   // Shown at once and kept on the phone if there's no signal.
   const [opt, setOpt] = useSynced(tasks);
-  const flip = (i: number) => start(async () => {
+  // The tick shows at once (outside the transition); sending happens in the background.
+  const flip = (i: number) => {
     const done = !opt[i].done;
     setOpt(opt.map((t, j) => (j === i ? { ...t, done } : t)));
-    const r = await fieldOp({ op: "setTask", assignmentId: id, index: i, done });
-    if (!("queued" in r)) router.refresh();
-  });
+    start(async () => {
+      const r = await fieldOp({ op: "setTask", assignmentId: id, index: i, done });
+      if (!("queued" in r)) router.refresh();
+    });
+  };
   return (
     <div className="card space-y-1">
       {opt.map((t, i) => (

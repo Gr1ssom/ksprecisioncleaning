@@ -64,23 +64,26 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
   const order = Object.fromEntries(route.map((r, i) => [r.id, i + 1]));
 
   const pick = (id: string) => { setSelected(id); setTimeout(() => panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); };
-  const startHere = (id: string) => start(async () => { setOptActive({ roomId: id, startedAt: new Date().toISOString() }); await send({ op: "startRoom", assignmentId, roomId: id }); });
-  const toggle = (roomId: string, label: string) => start(async () => {
+  // Each tap shows at once (state set outside the transition); sending runs in the background.
+  const startHere = (id: string) => { setOptActive({ roomId: id, startedAt: new Date().toISOString() }); start(() => send({ op: "startRoom", assignmentId, roomId: id })); };
+  const stopHere = () => { setOptActive(null); start(() => send({ op: "stopRoom", assignmentId })); };
+  const toggle = (roomId: string, label: string) => {
     const key = `${roomId}|${label}`, done = !optChecks.includes(key);
     setChecks(done ? [...optChecks, key] : optChecks.filter((k) => k !== key));
-    await send({ op: "setRoomTask", assignmentId, roomId, label, done });
-  });
-  const finish = (r: (typeof route)[number]) => start(async () => {
+    start(() => send({ op: "setRoomTask", assignmentId, roomId, label, done }));
+  };
+  const finish = (r: (typeof route)[number]) => {
     const remaining = r.tasks.filter((t) => !checked.has(`${r.id}|${t.label}`)).map((t) => t.label);
-    // All remaining are unticked, so this ticks them (one key toggles, several are added).
     setChecks([...new Set([...optChecks, ...remaining.map((l) => `${r.id}|${l}`)])]);
     const wasTiming = optActive?.roomId === r.id;
     if (wasTiming) setOptActive(null);
-    await send({ op: "finishRoom", assignmentId, roomId: r.id, labels: remaining });
-    if (wasTiming) await send({ op: "stopRoom", assignmentId });
     const after = route.find((x) => x.id !== r.id && !isDone(x));
     if (after) setSelected(after.id);
-  });
+    start(async () => {
+      await send({ op: "finishRoom", assignmentId, roomId: r.id, labels: remaining });
+      if (wasTiming) await send({ op: "stopRoom", assignmentId });
+    });
+  };
 
   if (!layout) return null;
   const sec = room ? total(room.id) : 0;
@@ -170,7 +173,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
               {canWork && (
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {optActive?.roomId === room.id ? (
-                    <button type="button" disabled={pending} onClick={() => start(async () => { setOptActive(null); await send({ op: "stopRoom", assignmentId }); })} className="btn-danger"><Square className="h-4 w-4 fill-current" />Stop</button>
+                    <button type="button" disabled={pending} onClick={stopHere} className="btn-danger"><Square className="h-4 w-4 fill-current" />Stop</button>
                   ) : (
                     <button type="button" disabled={pending} onClick={() => startHere(room.id)} className="btn-success"><Play className="h-4 w-4 fill-current" />{optActive ? "Switch here" : "Start"}</button>
                   )}
