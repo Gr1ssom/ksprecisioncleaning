@@ -1,13 +1,18 @@
 "use client";
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { fieldOp } from "@/lib/offline";
 
 /**
  * A form that grabs the device's GPS position before submitting, adding lat/lng/acc hidden fields.
  * If location is denied/unavailable the check-in still goes through, flagged as "no GPS".
  */
-export function GeoForm({ action, children, submitLabel, className = "btn-primary w-full", encType }: {
+export function GeoForm({ action, children, submitLabel, className = "btn-primary w-full", encType, offline }: {
   action: (f: FormData) => void | Promise<void>; children?: React.ReactNode; submitLabel: string; className?: string; encType?: string;
+  /** Without signal, save this action on the phone and send it later (instead of failing). */
+  offline?: "checkIn" | "checkOut" | "clockIn" | "clockOut";
 }) {
+  const router = useRouter();
   const ref = useRef<HTMLFormElement>(null);
   const [state, setState] = useState<"idle" | "locating" | "sending">("idle");
   const [msg, setMsg] = useState<string | null>(null);
@@ -19,7 +24,23 @@ export function GeoForm({ action, children, submitLabel, className = "btn-primar
     set("lng", pos ? String(pos.coords.longitude) : "");
     set("acc", pos ? String(pos.coords.accuracy) : "");
     setState("sending");
+    if (offline && !navigator.onLine) return void saveOffline(f, pos);
     f.requestSubmit();
+  }
+
+  async function saveOffline(f: HTMLFormElement, pos?: GeolocationPosition) {
+    const fd = new FormData(f);
+    const geo = { lat: pos?.coords.latitude ?? null, lng: pos?.coords.longitude ?? null, acc: pos?.coords.accuracy ?? null };
+    const assignmentId = String(fd.get("assignmentId") ?? "");
+    const note = String(fd.get("note") ?? "").trim() || null;
+    const r = await fieldOp(
+      offline === "checkIn" ? { op: "checkIn", assignmentId, geo, note }
+        : offline === "checkOut" ? { op: "checkOut", assignmentId, geo, note }
+          : { op: "clock", on: offline === "clockIn", geo },
+    );
+    setState("idle");
+    setMsg("error" in r ? r.error : "No signal: saved on your phone with the time and place. It will send by itself when you have signal.");
+    router.refresh();
   }
 
   function onClick(e: React.MouseEvent) {

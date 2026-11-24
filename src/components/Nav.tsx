@@ -2,13 +2,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu, X, LogOut } from "lucide-react";
+import { Bell, Menu, X, LogOut } from "lucide-react";
 import type { Role } from "@/lib/session";
 import { itemActive, navFor, onPage, pagesFor } from "@/lib/nav";
 import { Logo } from "./Logo";
 import pkg from "../../package.json";
 
-export function Nav({ role, name, logout }: { role: Role; name: string; logout: () => Promise<void> }) {
+export function Nav({ role, name, logout, unread = 0 }: { role: Role; name: string; logout: () => Promise<void>; unread?: number }) {
+  const bell = (
+    <Link href="/notifications" aria-label={unread ? `Alerts, ${unread} new` : "Alerts"} className="relative flex h-11 w-11 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100">
+      <Bell className="h-5 w-5" strokeWidth={1.75} />
+      {unread > 0 && <span className="absolute right-1 top-1 min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-bold leading-4 text-white">{unread > 9 ? "9+" : unread}</span>}
+    </Link>
+  );
   const path = usePathname();
   const items = navFor(role);
   const [more, setMore] = useState(false);
@@ -33,7 +39,7 @@ export function Nav({ role, name, logout }: { role: Role; name: string; logout: 
           ))}
         </nav>
         <div className="border-t border-slate-200 p-4">
-          <div className="text-sm font-semibold">{name}</div>
+          <div className="flex items-center justify-between"><div className="text-sm font-semibold">{name}</div>{bell}</div>
           <div className="eyebrow mb-2 text-[10px]">{role.toLowerCase()}</div>
           <div className="flex items-center justify-between">
             <form action={logout}><button className="text-xs text-slate-500 hover:text-red-600">Sign out</button></form>
@@ -44,8 +50,9 @@ export function Nav({ role, name, logout }: { role: Role; name: string; logout: 
 
       {/* Phone: slim top bar + bottom tabs, like a native app. */}
       <header className="pt-safe sticky top-0 z-20 border-b border-slate-200 bg-surface/95 backdrop-blur md:hidden">
-        <div className="flex h-14 items-center justify-center px-4">
+        <div className="relative flex h-14 items-center justify-center px-4">
           <Link href="/dashboard" className="flex h-12 items-center text-slate-900" aria-label="Dashboard"><Logo variant="mark" className="h-9 w-auto" /></Link>
+          <div className="absolute right-2 top-1.5">{bell}</div>
         </div>
       </header>
 

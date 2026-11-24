@@ -31,6 +31,7 @@ const STATUS: Record<string, string> = {
   SENT: "bg-blue-100 text-blue-700", PAID: "bg-emerald-100 text-emerald-700", VOID: "bg-slate-100 text-slate-400",
   OPEN: "bg-amber-100 text-amber-700", RESOLVED: "bg-emerald-100 text-emerald-700",
   SUPPLY_PICKUP: "bg-purple-100 text-purple-700", SITE_IN: "bg-emerald-100 text-emerald-700", SITE_OUT: "bg-slate-200 text-slate-700",
+  PENDING: "bg-amber-100 text-amber-800", APPROVED: "bg-emerald-100 text-emerald-700", DENIED: "bg-red-100 text-red-700",
   STAFF: "bg-slate-100 text-slate-700", MANAGER: "bg-blue-100 text-blue-700", OWNER: "bg-amber-100 text-amber-800",
 };
 export function Badge({ value, label }: { value: string; label?: string }) {

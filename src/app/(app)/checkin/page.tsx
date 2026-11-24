@@ -8,10 +8,11 @@ import { Empty, FenceBadge, PageHeader, Badge } from "@/components/ui";
 import { supplyPickup, siteCheckIn, siteCheckOut } from "@/app/actions/field";
 import { fmtDateTime, fmtTime, today } from "@/lib/format";
 import { DepotPicker } from "./DepotPicker";
+import { ShiftCard } from "@/components/ShiftCard";
 
 export const dynamic = "force-dynamic";
 
-export default async function CheckinPage({ searchParams }: { searchParams: Promise<{ mode?: string; done?: string; fence?: string }> }) {
+export default async function CheckinPage({ searchParams }: { searchParams: Promise<{ mode?: string; done?: string; fence?: string; error?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const mode = sp.mode === "pickup" ? "pickup" : "site";
@@ -35,6 +36,8 @@ export default async function CheckinPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader title="Check in" subtitle="Your location is recorded with each check-in." />
+      {sp.error && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{sp.error}</div>}
+      <div className="mb-5"><ShiftCard userId={user.id} back="/checkin" /></div>
       {sp.done === "pickup" && (
         <div className={`mb-4 rounded-xl p-3 text-sm ${sp.fence === "false" ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"}`}>
           {sp.fence === "false" ? "Pickup saved, but you look far from the depot. Your manager will see a flag." : "Pickup saved and inventory updated. ✓"}
@@ -48,7 +51,7 @@ export default async function CheckinPage({ searchParams }: { searchParams: Prom
           <div className="flex gap-2">
             <Link href={`/jobs/${active.assignmentId}`} className="btn-secondary flex-1">Open job</Link>
             <div className="flex-1">
-              <GeoForm action={siteCheckOut} submitLabel="Check out" className="btn-danger w-full">
+              <GeoForm action={siteCheckOut} submitLabel="Check out" className="btn-danger w-full" offline="checkOut">
                 <input type="hidden" name="assignmentId" value={active.assignmentId!} />
               </GeoForm>
             </div>
@@ -75,7 +78,7 @@ export default async function CheckinPage({ searchParams }: { searchParams: Prom
               </div>
               {j.location.accessNotes && <p className="mt-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600"><KeyRound className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{j.location.accessNotes}</p>}
               <div className="mt-3">
-                <GeoForm action={siteCheckIn} submitLabel="Check in here">
+                <GeoForm action={siteCheckIn} submitLabel="Check in here" offline="checkIn">
                   <input type="hidden" name="assignmentId" value={j.id} />
                   <input name="note" className="input" placeholder="Note (optional)" />
                 </GeoForm>

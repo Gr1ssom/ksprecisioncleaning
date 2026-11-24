@@ -1,11 +1,16 @@
 "use client";
-import { useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCheck, ChevronRight, Play, Square, StickyNote } from "lucide-react";
 import { FloorPlan } from "@/components/FloorPlan";
 import { PhotoInput } from "@/components/PhotoInput";
 import { ZoomPan } from "@/components/ZoomPan";
 import { roomIcon } from "@/components/roomIcons";
-import { addRoomPhoto, finishRoom, startRoom, stopRoom, toggleRoomTask } from "@/app/actions/field";
+import { addRoomPhoto } from "@/app/actions/field";
+import { fieldOp } from "@/lib/offline";
+import type { FieldOp } from "@/lib/fieldOps";
+import { useSynced } from "@/components/useSynced";
+import { useOfflineStart } from "@/components/useOfflineStart";
 import type { PlanLayout } from "@/lib/rooms";
 
 type Photo = { id: string; kind: "before" | "after"; url: string };
@@ -15,17 +20,27 @@ const fmtDur = (sec: number) => {
   return h ? `${h}h ${m}m` : `${m}:${String(s).padStart(2, "0")}`;
 };
 
-export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWork, usual, photos }: {
+export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWork: serverCanWork, canStart = false, usual, photos }: {
   assignmentId: string; layouts: PlanLayout[]; checks: string[];
+  /** Checked in on the phone but not sent yet (no signal): work may start. */
+  canStart?: boolean;
   spentSec: Record<string, number>; // closed timer seconds per room
   active: { roomId: string; startedAt: string } | null; canWork: boolean;
   usual: Record<string, number>; // average minutes per visit, from history
   photos: Record<string, Photo[]>;
 }) {
+  const canWork = useOfflineStart(assignmentId, canStart) || serverCanWork;
   const route = useMemo(() => layouts.flatMap((l) => l.rooms.map((r) => ({ ...r, layoutId: l.id }))), [layouts]);
-  const [optChecks, toggleOpt] = useOptimistic(checks, (cur: string[], keys: string[]) =>
-    keys.length === 1 ? (cur.includes(keys[0]) ? cur.filter((k) => k !== keys[0]) : [...cur, keys[0]]) : [...new Set([...cur, ...keys])]);
-  const [optActive, setOptActive] = useOptimistic(active, (_: typeof active, next: typeof active) => next);
+  // Shown at once and kept on the phone if there's no signal; the server's copy replaces it on refresh.
+  const [optChecks, setChecks] = useSynced(checks);
+  const [optActive, setOptActive] = useSynced(active);
+  const router = useRouter();
+  const [err, setErr] = useState<string | null>(null);
+  const send = async (body: FieldOp) => {
+    const r = await fieldOp(body);
+    if ("error" in r) setErr(r.error);
+    if (!("queued" in r)) router.refresh();
+  };
   const checked = useMemo(() => new Set(optChecks), [optChecks]);
   const progress = (r: (typeof route)[number]) => ({ done: r.tasks.filter((t) => checked.has(`${r.id}|${t.label}`)).length, of: r.tasks.length });
   const isDone = (r: (typeof route)[number]) => { const p = progress(r); return p.of > 0 && p.done === p.of; };
@@ -49,18 +64,26 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
   const order = Object.fromEntries(route.map((r, i) => [r.id, i + 1]));
 
   const pick = (id: string) => { setSelected(id); setTimeout(() => panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); };
-  const startHere = (id: string) => start(async () => { setOptActive({ roomId: id, startedAt: new Date().toISOString() }); await startRoom(assignmentId, id); });
-  const finish = (r: (typeof route)[number]) => start(async () => {
+  // Each tap shows at once (state set outside the transition); sending runs in the background.
+  const startHere = (id: string) => { setOptActive({ roomId: id, startedAt: new Date().toISOString() }); start(() => send({ op: "startRoom", assignmentId, roomId: id })); };
+  const stopHere = () => { setOptActive(null); start(() => send({ op: "stopRoom", assignmentId })); };
+  const toggle = (roomId: string, label: string) => {
+    const key = `${roomId}|${label}`, done = !optChecks.includes(key);
+    setChecks(done ? [...optChecks, key] : optChecks.filter((k) => k !== key));
+    start(() => send({ op: "setRoomTask", assignmentId, roomId, label, done }));
+  };
+  const finish = (r: (typeof route)[number]) => {
     const remaining = r.tasks.filter((t) => !checked.has(`${r.id}|${t.label}`)).map((t) => t.label);
-    // All remaining are unticked, so this ticks them (one key toggles, several are added).
-    toggleOpt(remaining.map((l) => `${r.id}|${l}`));
+    setChecks([...new Set([...optChecks, ...remaining.map((l) => `${r.id}|${l}`)])]);
     const wasTiming = optActive?.roomId === r.id;
     if (wasTiming) setOptActive(null);
-    await finishRoom(assignmentId, r.id, remaining);
-    if (wasTiming) await stopRoom(assignmentId);
     const after = route.find((x) => x.id !== r.id && !isDone(x));
     if (after) setSelected(after.id);
-  });
+    start(async () => {
+      await send({ op: "finishRoom", assignmentId, roomId: r.id, labels: remaining });
+      if (wasTiming) await send({ op: "stopRoom", assignmentId });
+    });
+  };
 
   if (!layout) return null;
   const sec = room ? total(room.id) : 0;
@@ -70,6 +93,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
 
   return (
     <div className="space-y-3">
+      {err && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{err}</div>}
       {/* Progress + next room */}
       <div className="card flex flex-wrap items-center gap-3 p-3">
         <div className="min-w-40 flex-1">
@@ -149,7 +173,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
               {canWork && (
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {optActive?.roomId === room.id ? (
-                    <button type="button" disabled={pending} onClick={() => start(async () => { setOptActive(null); await stopRoom(assignmentId); })} className="btn-danger"><Square className="h-4 w-4 fill-current" />Stop</button>
+                    <button type="button" disabled={pending} onClick={stopHere} className="btn-danger"><Square className="h-4 w-4 fill-current" />Stop</button>
                   ) : (
                     <button type="button" disabled={pending} onClick={() => startHere(room.id)} className="btn-success"><Play className="h-4 w-4 fill-current" />{optActive ? "Switch here" : "Start"}</button>
                   )}
@@ -163,7 +187,7 @@ export function RoomMap({ assignmentId, layouts, checks, spentSec, active, canWo
                     <li key={t.label}>
                       <label className={`flex min-h-12 items-start gap-3 py-3 text-base md:min-h-0 md:py-2 md:text-sm ${canWork ? "cursor-pointer" : ""}`}>
                         <input type="checkbox" className="mt-0.5 h-6 w-6 accent-emerald-600 md:h-5 md:w-5" checked={on} disabled={!canWork}
-                          onChange={() => start(async () => { toggleOpt([key]); await toggleRoomTask(assignmentId, room.id, t.label); })} />
+                          onChange={() => toggle(room.id, t.label)} />
                         <span className={`flex-1 ${on ? "text-slate-400 line-through" : ""}`}>
                           {t.label}{t.custom && <span className="badge ml-2 bg-purple-100 text-purple-800">this room</span>}
                         </span>
