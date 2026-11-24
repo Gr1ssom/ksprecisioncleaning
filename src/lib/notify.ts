@@ -15,19 +15,24 @@ export async function pushKeys() {
   if (vapid) return vapid;
   const sb = admin();
   const read = async () => {
-    const rows = must(await sb.from("AppSecret").select("key, value").in("key", ["vapidPublic", "vapidPrivate"]), "push keys") as { key: string; value: string }[];
-    const get = (k: string) => rows.find((r) => r.key === k)?.value;
-    return get("vapidPublic") && get("vapidPrivate") ? { publicKey: get("vapidPublic")!, privateKey: get("vapidPrivate")! } : null;
+    const row = must(await sb.from("AppSecret").select("value").eq("key", "vapid").maybeSingle(), "push keys") as { value: string } | null;
+    if (!row) return null;
+    const k = JSON.parse(row.value) as { publicKey: string; privateKey: string };
+    return k.publicKey && k.privateKey ? k : null;
   };
   let keys = await read();
-  if (!keys) {
+  for (let i = 0; !keys && i < 3; i++) {
     const k = webpush.generateVAPIDKeys();
-    // If two servers race, the first pair wins and both read it back.
-    await sb.from("AppSecret").upsert([{ key: "vapidPublic", value: k.publicKey }, { key: "vapidPrivate", value: k.privateKey }], { onConflict: "key", ignoreDuplicates: true });
+    // One row holds both halves, written in one statement, so two servers racing can't mix pairs:
+    // the first pair wins and both read it back.
+    const ins = await sb.from("AppSecret").upsert({ key: "vapid", value: JSON.stringify(k) }, { onConflict: "key", ignoreDuplicates: true });
+    if (ins.error) throw new Error(`Couldn't save phone-push keys: ${ins.error.message}`);
     keys = await read();
+    if (!keys) await new Promise((r) => setTimeout(r, 200));
   }
+  if (!keys) throw new Error("Phone-push keys are missing. Reload the page to try again.");
   vapid = keys;
-  return keys!;
+  return keys;
 }
 
 export async function notify(userIds: (string | null | undefined)[], n: Note) {

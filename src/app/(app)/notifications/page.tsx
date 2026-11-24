@@ -14,7 +14,8 @@ export default async function Notifications() {
   const me = await requireUser();
   const [list, keys] = await Promise.all([
     admin().from("Notification").select("*").eq("userId", me.id).order("createdAt", { ascending: false }).limit(60).then((r) => must(r, "alerts") as Notification[]),
-    pushKeys(),
+    // Alerts still show if the push keys can't be read; only the phone toggle is hidden.
+    pushKeys().catch(() => null),
   ]);
   const unread = list.filter((n) => !n.readAt).length;
   return (
@@ -42,7 +43,7 @@ export default async function Notifications() {
             </div>
           )}
         </section>
-        <aside><PushToggle publicKey={keys.publicKey} /></aside>
+        <aside>{keys ? <PushToggle publicKey={keys.publicKey} /> : <div className="card text-sm text-slate-600">Phone notifications aren&apos;t available right now. Reload the page to try again.</div>}</aside>
       </div>
     </>
   );

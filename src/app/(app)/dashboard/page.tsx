@@ -15,12 +15,14 @@ import { APP_TZ, fmtDate, fmtDateTime, fmtTime, hoursBetween, money, today, toda
 
 export const dynamic = "force-dynamic";
 
-export default async function Dashboard() {
+export default async function Dashboard({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const user = await requireUser();
+  const { error } = await searchParams;
   const announcements = must(await admin().from("Announcement").select("*").order("createdAt", { ascending: false }).limit(2), "announcements") as Announcement[];
   return (
     <>
       <PageHeader title={`Hi, ${user.name.split(" ")[0]}`} subtitle={new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: APP_TZ })} />
+      {error && <div className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</div>}
       {announcements.map((a) => (
         <div key={a.id} className="mb-4 rounded-xl border border-brand-100 bg-brand-50 p-4 text-sm">
           <div className="font-semibold text-slate-900"><Megaphone className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />{a.title}</div>
