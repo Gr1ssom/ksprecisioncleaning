@@ -48,7 +48,7 @@ export default async function Activity({ searchParams }: { searchParams: Promise
                     <span className="font-medium">{e.summary}</span>
                     <span className="text-xs text-slate-500">{fmtDateTime(e.at)}</span>
                   </div>
-                  <div className="text-xs text-slate-500">{e.actor?.name ?? "Someone no longer on the team"} · {e.action}</div>
+                  <div className="text-xs text-slate-500">{e.action.startsWith("auto.") ? "Automatic" : e.actor?.name ?? "Someone no longer on the team"} · {e.action}</div>
                   {e.after && e.before && (
                     <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
                       {Object.keys(e.after).map((k) => <li key={k}><span className="text-slate-500">{k}:</span> {show(e.before?.[k])} → {show(e.after?.[k])}</li>)}

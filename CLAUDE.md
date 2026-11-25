@@ -92,6 +92,34 @@ maps, SOPs, inventory, Wave invoicing and payroll export.
 - Mileage = straight-line miles between a person's check-ins per day (`mileageByDay`), shown on
   Payroll and in the CSV; say "straight-line", never claim it's driven distance.
 
+## Quality and clients (Phase 3)
+- **Inspections:** a manager scores each room of a job on its floor plan (`/jobs/[id]/inspect`):
+  `Inspection` (one per job, keeps `cleanerId`/`locationId` as on the day) + `InspectionRoom`
+  (PASS / TOUCH_UP / FAIL, note, photo). Scores and roll-ups come only from `src/lib/quality.ts`
+  (pure, tested): pass 100, touch-up 60, fail 0; ratings 5★ = 100, 1★ = 0; Reports shows them by
+  cleaner and location.
+- **Re-cleans:** `createFollowUp()` (`src/lib/followUps.ts`) makes a job at the same location with
+  `followUpOfId` / `inspectionId` / `issueId`, `noCharge = true` by default. `noCharge` visits are
+  never invoiced and earn $0 in reports; every unbilled-visit query filters them out.
+- **Client links without login:** `/r/<token>` (one visit report, `VisitReport.token`) and
+  `/c/<token>` (a client's portal, `Client.portalToken`, the owner can rotate it). They live in
+  `src/app/(public)` and are listed in `PUBLIC` in `src/middleware.ts`. Read them only through
+  `loadReport()` / `loadPortal()` (`src/lib/clientReports.ts`), which return that visit or client
+  and nothing else; photos as signed URLs. `submitFeedback` (`src/app/actions/public.ts`) is the one
+  action without `requireUser`: the token is its key. Ratings ≤ 2 open a CLIENT issue and alert managers.
+- **Email:** `src/lib/email.ts` sends through Resend only when `RESEND_API_KEY` and `EMAIL_FROM` are
+  set; otherwise screens offer "Copy link" / "Text link" (`ShareLink`) and say email isn't set up.
+  Visit reports go out after check-out (`afterCheckOut()` in `runFieldOp`) only for clients with
+  reports turned on; it never fails the check-out.
+- **Billing:** invoices are made only by the `bill_visits` RPC (invoice + visit links in one
+  transaction; refuses visits billed meanwhile). Lines come from `invoiceLines()` (`src/lib/billing.ts`).
+  On the 1st (Chicago) `/api/cron` makes one draft per client for visits before that month
+  (`createMonthlyDrafts`, claimed once per month in `BillingRun`); the Invoices page has the same
+  button. About hourly the cron marks SENT invoices PAID when Wave says so (`syncWavePaid`), audited as
+  `auto.*` (shown as "Automatic" on Activity).
+- **Job templates:** `Location.jobTemplate` (read with `parseTemplate()`): service, usual start/end,
+  usual cleaner, checklist, notes. New job fills in from it.
+
 ## Roles
 - `STAFF` < `MANAGER` < `OWNER` (`src/lib/session.ts`). Pages call `requireUser("MANAGER")` etc.;
   server actions check again themselves. Never rely on hiding a link.

@@ -107,3 +107,20 @@ export async function sendWaveInvoice(args: {
   check(sent.invoiceSend, "invoiceSend");
   return { waveInvoiceId: inv.id, viewUrl: inv.viewUrl };
 }
+
+/** Current Wave status of each invoice id (e.g. SENT, VIEWED, PARTIAL, PAID). Unknown ids are left out. */
+export async function waveInvoiceStatuses(ids: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < ids.length; i += 20) {
+    const chunk = ids.slice(i, i + 20);
+    // One request per 20 invoices: each is an aliased field (i0, i1, …) on the business.
+    const fields = chunk.map((_, k) => `i${k}: invoice(id: $i${k}) { id status }`).join(" ");
+    const vars = chunk.map((_, k) => `$i${k}: ID!`).join(", ");
+    const data = await gql<{ business: Record<string, { id: string; status: string } | null> }>(
+      `query($b: ID!, ${vars}) { business(id: $b) { ${fields} } }`,
+      { b: process.env.WAVE_BUSINESS_ID, ...Object.fromEntries(chunk.map((id, k) => [`i${k}`, id])) },
+    );
+    chunk.forEach((id, k) => { const inv = data.business?.[`i${k}`]; if (inv?.status) out[id] = inv.status; });
+  }
+  return out;
+}
