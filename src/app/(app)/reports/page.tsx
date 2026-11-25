@@ -16,14 +16,14 @@ function QualityTable({ title, rows, nameOf }: { title: string; rows: QualityRow
     <div className="card overflow-x-auto p-0">
       <div className="eyebrow px-3 pt-3">{title}</div>
       <table className="tbl">
-        <thead><tr><th>Name</th><th className="text-right">Score</th><th className="text-right">Pass</th><th className="text-right">Rooms</th><th className="text-right">Rating</th></tr></thead>
+        <thead><tr><th>Name</th><th className="text-right">Score</th><th className="text-right">Pass</th><th className="hidden text-right sm:table-cell">Rooms</th><th className="text-right">Rating</th></tr></thead>
         <tbody>
           {[...rows].sort((a, b) => (a.score ?? 101) - (b.score ?? 101)).map((r) => (
             <tr key={r.key}>
-              <td className="font-medium">{nameOf(r.key)}</td>
+              <td className="font-medium">{nameOf(r.key)}{r.fails ? <span className="block text-xs text-red-600 sm:hidden">{r.fails} failed room{r.fails === 1 ? "" : "s"}</span> : null}</td>
               <td className={`text-right font-semibold ${r.score != null && r.score < 80 ? "text-red-600" : ""}`}>{r.score ?? "—"}</td>
               <td className="text-right">{r.passRate != null ? `${Math.round(r.passRate * 100)}%` : "—"}</td>
-              <td className="text-right">{r.rooms}{r.fails ? <span className="text-xs text-red-600"> ({r.fails} fail)</span> : null}</td>
+              <td className="hidden text-right sm:table-cell">{r.rooms}{r.fails ? <span className="text-xs text-red-600"> ({r.fails} fail)</span> : null}</td>
               <td className="text-right">{r.avgRating != null ? `${r.avgRating} (${r.ratings})` : "—"}</td>
             </tr>
           ))}
