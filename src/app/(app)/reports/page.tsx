@@ -9,6 +9,29 @@ import { roomTimeReport } from "@/lib/reports";
 import { APP_TZ, hoursBetween, money, today } from "@/lib/format";
 import { PrintButton } from "./PrintButton";
 import { rateBook } from "@/lib/pricing";
+import { qualityByKey, type QualityRow, type RoomResult } from "@/lib/quality";
+
+function QualityTable({ title, rows, nameOf }: { title: string; rows: QualityRow[]; nameOf: (id: string) => string }) {
+  return (
+    <div className="card overflow-x-auto p-0">
+      <div className="eyebrow px-3 pt-3">{title}</div>
+      <table className="tbl">
+        <thead><tr><th>Name</th><th className="text-right">Score</th><th className="text-right">Pass</th><th className="text-right">Rooms</th><th className="text-right">Rating</th></tr></thead>
+        <tbody>
+          {[...rows].sort((a, b) => (a.score ?? 101) - (b.score ?? 101)).map((r) => (
+            <tr key={r.key}>
+              <td className="font-medium">{nameOf(r.key)}</td>
+              <td className={`text-right font-semibold ${r.score != null && r.score < 80 ? "text-red-600" : ""}`}>{r.score ?? "—"}</td>
+              <td className="text-right">{r.passRate != null ? `${Math.round(r.passRate * 100)}%` : "—"}</td>
+              <td className="text-right">{r.rooms}{r.fails ? <span className="text-xs text-red-600"> ({r.fails} fail)</span> : null}</td>
+              <td className="text-right">{r.avgRating != null ? `${r.avgRating} (${r.ratings})` : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +55,7 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   let onTime = 0, timed = 0;
   for (const j of jobs) {
     const e = per.get(j.locationId) ?? { name: j.location.name, visits: 0, revenue: 0, hours: 0, labor: 0 };
-    const price = rate(j.location.clientId, j.serviceTypeId) ?? 0;
+    const price = j.noCharge ? 0 : rate(j.location.clientId, j.serviceTypeId) ?? 0;
     e.visits++; e.revenue += price;
     const sv = bySvc.get(j.serviceType?.name ?? "No service type") ?? { visits: 0, revenue: 0, hours: 0 };
     sv.visits++; sv.revenue += price;
@@ -49,6 +72,19 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
   }
   const rows = [...per.values()].sort((a, b) => b.revenue - a.revenue);
   const missed = (await sb.from("Assignment").select("id", { count: "exact", head: true }).gte("date", today(-days)).eq("status", "MISSED")).count ?? 0;
+  // Quality: finished inspections' rooms and client ratings in the window, by cleaner and by location.
+  const since = new Date(Date.now() - days * 86400_000).toISOString();
+  const [qRooms, qRatings, people] = await Promise.all([
+    sb.from("InspectionRoom").select("result, inspection:Inspection!inner(cleanerId, locationId, completedAt)").not("inspection.completedAt", "is", null).gte("inspection.completedAt", since)
+      .then((r) => must(r, "inspections") as unknown as { result: RoomResult; inspection: { cleanerId: string | null; locationId: string } }[]),
+    sb.from("VisitFeedback").select("rating, cleanerId, locationId").gte("updatedAt", since).then((r) => must(r, "ratings") as { rating: number; cleanerId: string | null; locationId: string }[]),
+    sb.from("User").select("id, name").then((r) => must(r, "team") as { id: string; name: string }[]),
+  ]);
+  const byCleaner = qualityByKey(qRooms.map((x) => ({ key: x.inspection.cleanerId, result: x.result })), qRatings.map((x) => ({ key: x.cleanerId, rating: x.rating })));
+  const byLocation = qualityByKey(qRooms.map((x) => ({ key: x.inspection.locationId, result: x.result })), qRatings.map((x) => ({ key: x.locationId, rating: x.rating })));
+  const nameOf = (id: string) => people.find((u) => u.id === id)?.name ?? locations.find((l) => l.id === id)?.name ?? "Inactive location";
+  const allQ = qualityByKey(qRooms.map((x) => ({ key: "all", result: x.result })), qRatings.map((x) => ({ key: "all", rating: x.rating }))).get("all");
+
   const [report, plans] = loc ? await Promise.all([roomTimeReport(loc.id, days), layoutsWithTasks(loc.id)]) : [null, []];
 
   return (
@@ -82,6 +118,22 @@ export default async function Reports({ searchParams }: { searchParams: Promise<
             <Stat label="On-time arrival" value={timed ? `${Math.round((onTime / timed) * 100)}%` : "—"} hint="within 10 min of start" />
             <Stat label="Gross margin" value={(() => { const r = rows.reduce((s, x) => s + x.revenue, 0); const l = rows.reduce((s, x) => s + x.labor, 0); return r ? `${Math.round(((r - l) / r) * 100)}%` : "—"; })()} hint="revenue less labor" />
           </div>
+          <h2 className="h2 mb-2">Quality</h2>
+          <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Stat label="Quality score" value={allQ?.score ?? "—"} hint="out of 100" />
+            <Stat label="Passed first time" value={allQ?.passRate != null ? `${Math.round(allQ.passRate * 100)}%` : "—"} hint={`${allQ?.rooms ?? 0} rooms inspected`} tone={allQ?.passRate != null && allQ.passRate < 0.9 ? "amber" : "slate"} />
+            <Stat label="Client rating" value={allQ?.avgRating != null ? `${allQ.avgRating}/5` : "—"} hint={`${allQ?.ratings ?? 0} ratings`} />
+            <Stat label="Failed rooms" value={allQ ? allQ.fails : 0} hint="in inspections" tone={allQ?.fails ? "red" : "slate"} />
+          </div>
+          {byCleaner.size || byLocation.size ? (
+            <div className="mb-6 grid gap-3 lg:grid-cols-2">
+              <QualityTable title="By cleaner" rows={[...byCleaner.values()]} nameOf={nameOf} />
+              <QualityTable title="By location" rows={[...byLocation.values()]} nameOf={nameOf} />
+            </div>
+          ) : <div className="mb-6"><Empty>No inspections or client ratings in this period yet. Inspect a finished job from its page, or turn on visit reports for a client.</Empty></div>}
+          <p className="muted mb-2">Quality score: every inspected room (pass 100, touch-up 60, fail 0) and every client rating (5 stars = 100, 1 star = 0) counts once.</p>
+
+          <h2 className="h2 mb-2 mt-6">By location</h2>
           <div className="card overflow-x-auto p-0">
             <table className="tbl">
               <thead><tr><th>Location</th><th className="text-right">Visits</th><th className="text-right">Revenue</th><th className="text-right">Hours</th><th className="text-right">Labor</th><th className="text-right">Margin</th><th className="text-right">$/hour</th></tr></thead>

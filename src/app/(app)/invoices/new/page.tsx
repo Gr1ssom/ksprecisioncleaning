@@ -17,7 +17,7 @@ export default async function NewInvoice({ searchParams }: { searchParams: Promi
   const clientId = sp.clientId ?? clients[0]?.id;
   const visits = (clientId
     ? must(await sb.from("Assignment").select("*, location:Location!inner(*), user:User!Assignment_userId_fkey(name), serviceType:ServiceType(*)")
-        .eq("status", "COMPLETED").is("invoiceId", null).eq("location.clientId", clientId).order("date"), "visits")
+        .eq("status", "COMPLETED").is("invoiceId", null).eq("noCharge", false).eq("location.clientId", clientId).order("date"), "visits")
     : []) as (Assignment & { location: Location; user: Pick<Profile, "name"> | null; serviceType: ServiceType | null })[];
   const rate = await rateBook();
   const unpriced = visits.filter((v) => rate(clientId, v.serviceTypeId) == null);

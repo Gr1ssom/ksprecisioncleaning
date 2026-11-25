@@ -294,7 +294,11 @@ export async function saveClient(form: FormData) {
   const me = await requireUser("MANAGER");
   const sb = admin();
   const id = s(form, "id");
-  const data = { name: String(form.get("name")), contactName: s(form, "contactName"), email: s(form, "email"), phone: s(form, "phone"), billingAddress: s(form, "billingAddress"), waveCustomerId: s(form, "waveCustomerId"), notes: s(form, "notes") };
+  const data = {
+    name: String(form.get("name")), contactName: s(form, "contactName"), email: s(form, "email"), phone: s(form, "phone"), billingAddress: s(form, "billingAddress"), waveCustomerId: s(form, "waveCustomerId"), notes: s(form, "notes"),
+    reportsEnabled: form.get("reportsEnabled") === "on", reportEmail: s(form, "reportEmail"),
+  };
+  const prevReports = id ? (must(await sb.from("Client").select("reportsEnabled, reportEmail").eq("id", id).single(), "client") as { reportsEnabled: boolean; reportEmail: string | null }) : null;
   const client = must(id ? await sb.from("Client").update(data).eq("id", id).select("id").single() : await sb.from("Client").insert(data).select("id").single(), "save client") as { id: string };
   // Per-visit price for each service type: rate_<serviceTypeId>. Blank = not offered / not priced yet.
   const set: { clientId: string; serviceTypeId: string; price: number }[] = [];
@@ -316,6 +320,8 @@ export async function saveClient(form: FormData) {
   const ch = diff(byName(before), byName(Object.fromEntries(Object.entries(after).filter(([k, v]) => v !== null || k in before))));
   if (!id) await audit(me, "client.create", "Client", client.id, `Added client ${data.name}`, { after: ch.after });
   else if (ch.after) await audit(me, "client.prices", "Client", client.id, `Changed prices for ${data.name}`, ch);
+  const rch = diff(prevReports, { reportsEnabled: data.reportsEnabled, reportEmail: data.reportEmail });
+  if (id && rch.after) await audit(me, "client.reports", "Client", client.id, `Visit reports for ${data.name}: ${data.reportsEnabled ? "on" : "off"}${data.reportEmail ? ` (to ${data.reportEmail})` : ""}`, rch);
   // Locations added on the same form (loc_address / loc_name / loc_notes, one of each per row).
   const addrs = form.getAll("loc_address").map(String), locNames = form.getAll("loc_name").map(String), locNotes = form.getAll("loc_notes").map(String);
   const rows = addrs.map((address, i) => ({ address: address.trim(), name: (locNames[i] ?? "").trim(), accessNotes: (locNotes[i] ?? "").trim() || null })).filter((r) => r.address);

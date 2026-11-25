@@ -3,7 +3,8 @@ import { createServerClient } from "@supabase/ssr";
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "@/lib/supabase/env";
 
 // /api/cron authenticates with its own key (the database calls it, not a person).
-const PUBLIC = ["/login", "/setup", "/forgot", "/auth/confirm", "/api/cron"];
+// /r/<token> (a visit report) and /c/<token> (a client's portal) open by their secret token, no login.
+const PUBLIC = ["/login", "/setup", "/forgot", "/auth/confirm", "/api/cron", "/r/", "/c/"];
 
 /** Keeps the Supabase Auth session fresh and sends signed-out visitors to /login. */
 export async function middleware(req: NextRequest) {

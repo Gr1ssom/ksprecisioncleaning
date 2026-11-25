@@ -11,10 +11,16 @@ export type Profile = {
 export type Client = {
   id: string; name: string; contactName: string | null; email: string | null; phone: string | null;
   billingAddress: string | null; waveCustomerId: string | null; notes: string | null; createdAt: string;
+  /** Visit reports after check-out (off by default) and where they go (blank = the billing email). */
+  reportsEnabled: boolean; reportEmail: string | null;
+  /** Secret part of the client's read-only portal link (/c/<token>). The owner can change it. */
+  portalToken: string;
 };
 export type Location = {
   id: string; name: string; address: string; latitude: number | null; longitude: number | null; geofenceM: number;
   accessNotes: string | null; active: boolean; clientId: string | null; createdAt: string;
+  /** Job template (see src/lib/templates.ts); read with parseTemplate(). */
+  jobTemplate: unknown;
 };
 export type SupplyDepot = { id: string; name: string; address: string; latitude: number | null; longitude: number | null; geofenceM: number };
 export type Sop = {
@@ -45,6 +51,10 @@ export type Assignment = {
   id: string; locationId: string; serviceTypeId: string | null; userId: string | null; createdById: string | null;
   date: string; startTime: string; endTime: string | null; status: AssignmentStatus; tasks: { label: string; done: boolean }[];
   notes: string | null; invoiceId: string | null; createdAt: string;
+  /** Re-clean loop: the job this one fixes, and the inspection or issue behind it. */
+  followUpOfId: string | null; inspectionId: string | null; issueId: string | null;
+  /** Free visit (re-cleans): never invoiced, no revenue in reports. */
+  noCharge: boolean;
 };
 export type CheckinType = "SUPPLY_PICKUP" | "SITE_IN" | "SITE_OUT";
 export type Checkin = {
@@ -63,7 +73,9 @@ export type Invoice = {
   waveInvoiceId: string | null; waveViewUrl: string | null; waveError: string | null; sentAt: string | null; createdAt: string;
 };
 export type Issue = {
-  id: string; title: string; detail: string | null; photoPath: string | null; locationId: string | null; reportedById: string;
+  id: string; title: string; detail: string | null; photoPath: string | null; locationId: string | null;
+  /** Null for client complaints (source CLIENT). */
+  reportedById: string | null; source: "STAFF" | "CLIENT"; assignmentId: string | null;
   status: "OPEN" | "RESOLVED"; createdAt: string; resolvedAt: string | null;
 };
 export type Announcement = { id: string; title: string; body: string; createdAt: string };
@@ -93,3 +105,22 @@ export type Notification = {
   id: string; userId: string; kind: string; title: string; body: string | null; url: string | null;
   dedupe: string | null; createdAt: string; readAt: string | null;
 };
+
+// Phase 3: inspections, client visit reports and feedback, monthly billing runs.
+export type InspectionResult = "PASS" | "TOUCH_UP" | "FAIL";
+export type Inspection = {
+  id: string; assignmentId: string; inspectorId: string | null; cleanerId: string | null; locationId: string;
+  note: string | null; score: number | null; createdAt: string; completedAt: string | null;
+};
+export type InspectionRoom = {
+  id: string; inspectionId: string; roomId: string | null; roomName: string; result: InspectionResult;
+  note: string | null; photoPath: string | null; createdAt: string;
+};
+export type VisitReport = {
+  id: string; assignmentId: string; token: string; createdAt: string; sentAt: string | null; sentTo: string | null; emailError: string | null;
+};
+export type VisitFeedback = {
+  id: string; assignmentId: string; rating: number; comment: string | null; cleanerId: string | null; locationId: string;
+  createdAt: string; updatedAt: string;
+};
+export type BillingRun = { month: string; startedAt: string; invoices: number; byId: string | null };
